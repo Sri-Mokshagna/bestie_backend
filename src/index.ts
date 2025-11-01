@@ -44,6 +44,9 @@ const io = new SocketServer(httpServer, {
 
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy - Required for Render.com and rate limiting
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(helmet());
 app.use(
@@ -60,6 +63,8 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
   message: 'Too many requests from this IP, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
