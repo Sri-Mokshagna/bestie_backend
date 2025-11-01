@@ -50,7 +50,18 @@ export const callService = {
     });
 
     if (activeCall) {
-      throw new AppError(400, 'Responder is busy');
+      // Auto-mark old ringing calls as missed (older than 60 seconds)
+      const now = new Date();
+      const callAge = now.getTime() - activeCall.createdAt.getTime();
+      
+      if (activeCall.status === CallStatus.RINGING && callAge > 60000) {
+        // Mark as missed and allow new call
+        activeCall.status = CallStatus.MISSED;
+        activeCall.endTime = now;
+        await activeCall.save();
+      } else {
+        throw new AppError(400, 'Responder is busy');
+      }
     }
 
     // Generate ZEGOCLOUD room ID
@@ -254,6 +265,44 @@ export const callService = {
 
   generateRoomId(): string {
     return `room_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+  },
+
+  async cleanupStaleCalls() {
+    const now = new Date();
+    const sixtySecondsAgo = new Date(now.getTime() - 60000);
+
+    // Mark old ringing calls as missed
+    const ringingResult = await Call.updateMany(
+      {
+        status: CallStatus.RINGING,
+        createdAt: { $lt: sixtySecondsAgo },
+      },
+      {
+        $set: {
+          status: CallStatus.MISSED,
+          endTime: now,
+        },
+      }
+    );
+
+    // Mark old active calls as ended (shouldn't happen, but just in case)
+    const activeResult = await Call.updateMany(
+      {
+        status: CallStatus.ACTIVE,
+        startTime: { $lt: sixtySecondsAgo },
+      },
+      {
+        $set: {
+          status: CallStatus.ENDED,
+          endTime: now,
+        },
+      }
+    );
+
+    return {
+      ringingCallsCleaned: ringingResult.modifiedCount,
+      activeCallsCleaned: activeResult.modifiedCount,
+    };
   },
 
   generateZegoToken(userId: string, roomId: string): string {

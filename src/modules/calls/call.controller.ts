@@ -101,4 +101,10 @@ export const callController = {
 
     res.json({ call });
   },
+
+  // Cleanup endpoint - mark old ringing calls as missed
+  async cleanupStaleCalls(req: AuthRequest, res: Response) {
+    const result = await callService.cleanupStaleCalls();
+    res.json({ message: 'Cleanup completed', ...result });
+  },
 };
