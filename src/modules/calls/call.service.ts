@@ -16,16 +16,17 @@ async function getCallMeteringQueue() {
 
 export const callService = {
   async initiateCall(userId: string, responderId: string, type: CallType) {
-    // Verify user has sufficient balance
+    // Verify user exists
     const user = await User.findById(userId);
     if (!user) {
       throw new AppError(404, 'User not found');
     }
 
-    const minCoins = type === CallType.AUDIO ? 10 : 60;
-    if (user.coinBalance < minCoins) {
-      throw new AppError(400, 'Insufficient coins for call');
-    }
+    // TODO: Re-enable coin checking when coins feature is ready
+    // const minCoins = type === CallType.AUDIO ? 10 : 60;
+    // if (user.coinBalance < minCoins) {
+    //   throw new AppError(400, 'Insufficient coins for call');
+    // }
 
     // Verify responder exists and is online
     const responder = await Responder.findById(responderId);
