@@ -118,6 +118,11 @@ export const callService = {
     call.startTime = new Date();
     await call.save();
 
+    // Notify caller that call was accepted
+    emitToUser(call.userId.toString(), 'call_accepted', {
+      callId: String(call._id),
+    });
+
     // Start metering job (if Redis is enabled)
     const queue = await getCallMeteringQueue();
     if (queue) {
