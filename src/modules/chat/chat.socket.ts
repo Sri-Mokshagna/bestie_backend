@@ -5,6 +5,7 @@ import { User } from '../../models/User';
 import { walletService } from '../wallet/wallet.service';
 import { TransactionType } from '../../models/Transaction';
 import { logger } from '../../lib/logger';
+import { getAuth } from 'firebase-admin/auth';
 
 const CHAT_COINS_PER_MESSAGE = parseInt(
   process.env.CHAT_COINS_PER_MESSAGE || '3',
@@ -22,15 +23,26 @@ export function initializeChatSocket(io: SocketServer) {
       const token = socket.handshake.auth.token;
 
       if (!token) {
+        logger.warn({ msg: 'Socket connection attempt without token' });
         return next(new Error('Authentication error'));
       }
 
-      const secret = process.env.JWT_SECRET!;
-      const decoded = jwt.verify(token, secret) as { id: string };
+      // Verify Firebase ID token
+      const decodedToken = await getAuth().verifyIdToken(token);
+      const firebaseUid = decodedToken.uid;
 
-      socket.userId = decoded.id;
+      // Find user by Firebase UID
+      const user = await User.findOne({ firebaseUid });
+      if (!user) {
+        logger.warn({ msg: 'Socket auth failed: User not found', firebaseUid });
+        return next(new Error('Authentication error'));
+      }
+
+      socket.userId = user._id.toString();
+      logger.info({ msg: 'Socket authenticated', userId: socket.userId });
       next();
     } catch (error) {
+      logger.error({ msg: 'Socket authentication error', error });
       next(new Error('Authentication error'));
     }
   });
