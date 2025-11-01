@@ -141,7 +141,7 @@ export const chatController = {
       participants: [req.user.id, participantId],
     });
 
-    res.json({ chat });
+    return res.json({ chat });
   },
 
   async sendMessage(req: AuthRequest, res: Response) {

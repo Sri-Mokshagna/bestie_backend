@@ -40,7 +40,7 @@ export const authController = {
     }
   },
 
-  async refreshToken(req: AuthRequest, res: Response) {
+  async refreshToken(_req: AuthRequest, res: Response) {
     // JWT flow disabled; clients should refresh Firebase ID tokens via Firebase SDK
     return res.status(410).json({ error: 'JWT flow disabled; use Firebase ID token' });
   },

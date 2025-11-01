@@ -40,7 +40,7 @@ export const authenticate = async (
 
       if (user && user.status === 'active') {
         req.user = {
-          id: user._id.toString(),
+          id: String(user._id),
           phone: user.phone,
           role: user.role,
         };
@@ -84,6 +84,6 @@ export const authorize = (...roles: UserRole[]) => {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
-    next();
+    return next();
   };
 };
