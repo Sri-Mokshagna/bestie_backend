@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import { Call, CallType, CallStatus } from '../../models/Call';
 import { User } from '../../models/User';
-import { Responder } from '../../models/Responder';
 import { AppError } from '../../middleware/errorHandler';
 import { emitToUser } from '../../lib/socket';
 
@@ -28,25 +27,25 @@ export const callService = {
     //   throw new AppError(400, 'Insufficient coins for call');
     // }
 
-    // Find responder by userId (responderId could be either Responder._id or User._id)
-    let responder = await Responder.findById(responderId);
+    // Find responder user (responderId is the User._id with role 'responder')
+    const responderUser = await User.findById(responderId);
     
-    // If not found by _id, try finding by userId
-    if (!responder) {
-      responder = await Responder.findOne({ userId: responderId });
-    }
-    
-    if (!responder) {
+    if (!responderUser) {
       throw new AppError(404, 'Responder not found');
     }
 
-    if (!responder.isOnline) {
-      throw new AppError(400, 'Responder is offline');
+    if (responderUser.role !== 'responder') {
+      throw new AppError(400, 'User is not a responder');
     }
+
+    // TODO: Add isOnline check when implemented
+    // if (!responderUser.isOnline) {
+    //   throw new AppError(400, 'Responder is offline');
+    // }
 
     // Check if responder is already on a call
     const activeCall = await Call.findOne({
-      responderId: responder._id,
+      responderId: responderUser._id,
       status: { $in: [CallStatus.RINGING, CallStatus.ACTIVE] },
     });
 
@@ -60,19 +59,18 @@ export const callService = {
     // Create call record
     const call = await Call.create({
       userId,
-      responderId: responder._id,
+      responderId: responderUser._id,
       type,
       zegoRoomId,
       status: CallStatus.RINGING,
     });
 
-    // Get user and responder names for display
-    const responderUser = await User.findById(responder.userId);
+    // Get names for display
     const callerName = user.profile?.name || user.phone || 'Unknown';
-    const receiverName = responderUser?.profile?.name || responderUser?.phone || 'Responder';
+    const receiverName = responderUser.profile?.name || responderUser.phone || 'Responder';
 
     // Emit socket event to responder for real-time notification
-    emitToUser(responder.userId.toString(), 'incoming_call', {
+    emitToUser(responderUser._id.toString(), 'incoming_call', {
       id: String(call._id),
       userId: call.userId.toString(),
       responderId: call.responderId.toString(),
