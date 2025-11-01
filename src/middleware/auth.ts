@@ -34,6 +34,12 @@ export const authenticate = async (
       let user = null;
       if (phone) {
         user = await User.findOne({ phone });
+        
+        // Update firebaseUid if missing
+        if (user && !user.firebaseUid) {
+          user.firebaseUid = uid;
+          await user.save();
+        }
       } else if (uid) {
         // Admin flow: custom token signs in with uid = Mongo user.id
         user = await User.findById(uid);

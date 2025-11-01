@@ -57,6 +57,7 @@ export const authService = {
       // Verify Firebase ID token
       const decodedToken = await admin.auth().verifyIdToken(idToken);
       const phone = decodedToken.phone_number;
+      const firebaseUid = decodedToken.uid;
 
       if (!phone) {
         throw new AppError(400, 'Phone number not found in token');
@@ -71,12 +72,18 @@ export const authService = {
       }
 
       if (!user) {
+        // Create new user with Firebase UID
         user = await User.create({
           phone,
+          firebaseUid,
           role: UserRole.USER,
           coinBalance: 0,
           profile: {},
         });
+      } else if (!user.firebaseUid) {
+        // Update existing user with Firebase UID if missing
+        user.firebaseUid = firebaseUid;
+        await user.save();
       }
 
       // Return only user; client should send Firebase ID token on subsequent requests

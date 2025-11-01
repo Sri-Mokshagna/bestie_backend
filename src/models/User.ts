@@ -23,6 +23,7 @@ export interface IUserProfile {
 
 export interface IUser extends Document {
   phone: string;
+  firebaseUid?: string; // Firebase UID for socket authentication
   role: UserRole;
   coinBalance: number;
   profile: IUserProfile;
@@ -41,6 +42,11 @@ const userSchema = new Schema<IUser>(
       type: String,
       required: true,
       unique: true,
+      index: true,
+    },
+    firebaseUid: {
+      type: String,
+      sparse: true, // Allow null/undefined while keeping unique
       index: true,
     },
     role: {
