@@ -9,8 +9,13 @@ const REDIS_ENABLED = process.env.REDIS_ENABLED !== 'false';
 
 async function getCallMeteringQueue() {
   if (!REDIS_ENABLED) return null;
-  const mod = await import('../../jobs/callMetering');
-  return mod.callMeteringQueue as any;
+  try {
+    const mod = await import('../../jobs/callMetering');
+    return mod.callMeteringQueue as any;
+  } catch (error) {
+    logger.warn({ msg: 'Call metering disabled - Redis not available' });
+    return null;
+  }
 }
 
 export const callService = {
