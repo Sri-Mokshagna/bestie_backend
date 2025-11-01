@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { Call, CallType, CallStatus } from '../../models/Call';
 import { User } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
+import { logger } from '../../lib/logger';
 import { emitToUser } from '../../lib/socket';
 
 // Make call metering optional based on Redis availability
