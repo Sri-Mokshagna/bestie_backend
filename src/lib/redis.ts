@@ -32,7 +32,7 @@ if (redis) {
   });
 
   redis.on('error', (err) => {
-    logger.error('❌ Redis connection error:', err.message);
+    logger.error({ err: err.message }, '❌ Redis connection error');
   });
 
   redis.on('close', () => {
@@ -41,7 +41,7 @@ if (redis) {
 
   // Try to connect
   redis.connect().catch((err) => {
-    logger.error('Failed to connect to Redis:', err.message);
+    logger.error({ err: err.message }, 'Failed to connect to Redis');
     logger.warn('Continuing without Redis. Call metering will not work.');
   });
 

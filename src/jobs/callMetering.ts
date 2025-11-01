@@ -131,7 +131,7 @@ if (REDIS_ENABLED && redis) {
           session.endSession();
         }
       } catch (error) {
-        logger.error(`Call metering error for ${callId}:`, error);
+        logger.error({ error, callId }, 'Call metering error');
         throw error;
       }
     },
@@ -142,11 +142,11 @@ if (REDIS_ENABLED && redis) {
   );
 
   callMeteringWorker.on('completed', (job) => {
-    logger.debug(`Job ${job.id} completed:`, job.returnvalue);
+    logger.debug({ jobId: job.id, result: job.returnvalue }, 'Job completed');
   });
 
   callMeteringWorker.on('failed', (job, err) => {
-    logger.error(`Job ${job?.id} failed:`, err);
+    logger.error({ jobId: job?.id, err }, 'Job failed');
   });
 } else {
   logger.warn('Call metering jobs are disabled (Redis not enabled).');

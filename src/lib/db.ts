@@ -10,7 +10,7 @@ export async function connectDB() {
     logger.info('MongoDB connected successfully');
 
     mongoose.connection.on('error', (err) => {
-      logger.error('MongoDB connection error:', err);
+      logger.error({ err }, 'MongoDB connection error');
     });
 
     mongoose.connection.on('disconnected', () => {
@@ -23,7 +23,7 @@ export async function connectDB() {
       process.exit(0);
     });
   } catch (error) {
-    logger.error('Failed to connect to MongoDB:', error);
+    logger.error({ error }, 'Failed to connect to MongoDB');
     process.exit(1);
   }
 }

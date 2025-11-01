@@ -15,7 +15,7 @@ export function initializeFirebase() {
 
     logger.info('Firebase Admin initialized successfully');
   } catch (error) {
-    logger.error('Failed to initialize Firebase Admin:', error);
+    logger.error({ error }, 'Failed to initialize Firebase Admin');
     throw error;
   }
 }
