@@ -28,8 +28,14 @@ export const callService = {
     //   throw new AppError(400, 'Insufficient coins for call');
     // }
 
-    // Verify responder exists and is online
-    const responder = await Responder.findById(responderId);
+    // Find responder by userId (responderId could be either Responder._id or User._id)
+    let responder = await Responder.findById(responderId);
+    
+    // If not found by _id, try finding by userId
+    if (!responder) {
+      responder = await Responder.findOne({ userId: responderId });
+    }
+    
     if (!responder) {
       throw new AppError(404, 'Responder not found');
     }
@@ -40,7 +46,7 @@ export const callService = {
 
     // Check if responder is already on a call
     const activeCall = await Call.findOne({
-      responderId,
+      responderId: responder._id,
       status: { $in: [CallStatus.RINGING, CallStatus.ACTIVE] },
     });
 
@@ -54,7 +60,7 @@ export const callService = {
     // Create call record
     const call = await Call.create({
       userId,
-      responderId,
+      responderId: responder._id,
       type,
       zegoRoomId,
       status: CallStatus.RINGING,
