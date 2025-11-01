@@ -16,6 +16,8 @@ export function emitToUser(userId: string, event: string, data: any) {
     return;
   }
   
+  console.log(`📤 Emitting '${event}' to user_${userId}`, data);
+  
   // Emit to specific user's room
   io.to(`user_${userId}`).emit(event, data);
 }
