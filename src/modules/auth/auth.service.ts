@@ -122,15 +122,38 @@ export const authService = {
           coinBalance: 0,
           profile: {},
         });
-        console.log('✅ New user created:', user.id);
+        console.log('✅ New user created:', {
+          id: user.id,
+          phone: user.phone,
+          firebaseUid: user.firebaseUid,
+          role: user.role,
+        });
       } else if (!user.firebaseUid) {
         console.log('🔄 Updating existing user with Firebase UID:', user.id);
         // Update existing user with Firebase UID if missing
         user.firebaseUid = firebaseUid;
         await user.save();
-        console.log('✅ User updated with Firebase UID');
+        console.log('✅ User updated with Firebase UID:', {
+          id: user.id,
+          phone: user.phone,
+          firebaseUid: user.firebaseUid,
+        });
+      } else if (user.firebaseUid !== firebaseUid) {
+        // Firebase UID changed (rare case)
+        console.warn('⚠️  Firebase UID mismatch, updating:', {
+          userId: user.id,
+          oldUid: user.firebaseUid,
+          newUid: firebaseUid,
+        });
+        user.firebaseUid = firebaseUid;
+        await user.save();
+        console.log('✅ User Firebase UID updated');
       } else {
-        console.log('✅ Existing user found:', user.id);
+        console.log('✅ Existing user found:', {
+          id: user.id,
+          phone: user.phone,
+          firebaseUid: user.firebaseUid,
+        });
       }
 
       // Return only user; client should send Firebase ID token on subsequent requests

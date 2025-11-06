@@ -32,9 +32,27 @@ export function initializeChatSocket(io: SocketServer) {
       const firebaseUid = decodedToken.uid;
 
       // Find user by Firebase UID
+      console.log('🔍 Socket auth: Looking up user by firebaseUid:', firebaseUid);
       const user = await User.findOne({ firebaseUid });
+      
       if (!user) {
-        logger.warn({ msg: 'Socket auth failed: User not found', firebaseUid });
+        // Try to find by phone number as fallback
+        const phoneNumber = decodedToken.phone_number;
+        console.log('⚠️  User not found by firebaseUid, trying phone:', phoneNumber);
+        
+        if (phoneNumber) {
+          const userByPhone = await User.findOne({ phone: phoneNumber });
+          if (userByPhone) {
+            console.log('✅ Found user by phone, updating firebaseUid');
+            userByPhone.firebaseUid = firebaseUid;
+            await userByPhone.save();
+            socket.userId = userByPhone._id.toString();
+            logger.info({ msg: 'Socket authenticated (via phone lookup)', userId: socket.userId });
+            return next();
+          }
+        }
+        
+        logger.warn({ msg: 'Socket auth failed: User not found', firebaseUid, phone: phoneNumber });
         return next(new Error('Authentication error'));
       }
 
