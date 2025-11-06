@@ -6,72 +6,114 @@ import { AppError } from '../../middleware/errorHandler';
 export const authService = {
   // Admin login with email/password
   async adminLogin(email: string, password: string) {
-    // Find admin user by email (include password field)
-    const user = await User.findOne({ 
-      'profile.email': email,
-      role: UserRole.ADMIN 
-    }).select('+password');
+    try {
+      // Find admin user by email (include password field)
+      const user = await User.findOne({ 
+        'profile.email': email,
+        role: UserRole.ADMIN 
+      }).select('+password');
 
-    if (!user) {
-      throw new AppError(401, 'Invalid credentials');
+      if (!user) {
+        throw new AppError(401, 'Invalid credentials');
+      }
+
+      // Check if password is set
+      if (!user.password) {
+        throw new AppError(401, 'Password not set for this admin');
+      }
+
+      // Verify password
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      if (!isValidPassword) {
+        throw new AppError(401, 'Invalid credentials');
+      }
+
+      // Check if user is active
+      if (user.status !== 'active') {
+        throw new AppError(403, 'Account is not active');
+      }
+
+      // Create a Firebase custom token; client will sign in to Firebase with it
+      let customToken;
+      try {
+        customToken = await admin.auth().createCustomToken(user.id, {
+          role: user.role,
+        });
+      } catch (firebaseError: any) {
+        console.error('Firebase createCustomToken error:', {
+          error: firebaseError.message,
+          code: firebaseError.code,
+          stack: firebaseError.stack,
+        });
+        throw new AppError(500, `Failed to generate authentication token: ${firebaseError.message}`);
+      }
+
+      return {
+        customToken,
+        user: {
+          id: user.id,
+          phone: user.phone,
+          role: user.role,
+          coinBalance: user.coinBalance,
+          profile: user.profile,
+          status: user.status,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+        },
+      };
+    } catch (error) {
+      // Re-throw AppErrors as-is
+      if (error instanceof AppError) {
+        throw error;
+      }
+      // Log and wrap unexpected errors
+      console.error('Unexpected error in adminLogin:', error);
+      throw new AppError(500, 'An unexpected error occurred during login');
     }
-
-    // Check if password is set
-    if (!user.password) {
-      throw new AppError(401, 'Password not set for this admin');
-    }
-
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    if (!isValidPassword) {
-      throw new AppError(401, 'Invalid credentials');
-    }
-
-    // Check if user is active
-    if (user.status !== 'active') {
-      throw new AppError(403, 'Account is not active');
-    }
-
-    // Create a Firebase custom token; client will sign in to Firebase with it
-    const customToken = await admin.auth().createCustomToken(user.id, {
-      role: user.role,
-    });
-
-    return {
-      customToken,
-      user: {
-        id: user.id,
-        phone: user.phone,
-        role: user.role,
-        coinBalance: user.coinBalance,
-        profile: user.profile,
-        status: user.status,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      },
-    };
   },
 
   async verifyFirebaseToken(idToken: string) {
     try {
+      console.log('🔐 Verifying Firebase token...');
+      
       // Verify Firebase ID token
-      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      let decodedToken;
+      try {
+        decodedToken = await admin.auth().verifyIdToken(idToken);
+        console.log('✅ Firebase token verified successfully', {
+          uid: decodedToken.uid,
+          phone: decodedToken.phone_number,
+          provider: decodedToken.firebase?.sign_in_provider,
+        });
+      } catch (firebaseError: any) {
+        console.error('❌ Firebase token verification failed:', {
+          error: firebaseError.message,
+          code: firebaseError.code,
+        });
+        throw new AppError(401, `Invalid Firebase token: ${firebaseError.message}`);
+      }
+
       const phone = decodedToken.phone_number;
       const firebaseUid = decodedToken.uid;
 
       if (!phone) {
+        console.error('❌ Phone number not found in token', { uid: firebaseUid });
         throw new AppError(400, 'Phone number not found in token');
       }
+
+      console.log('📱 Looking up user by phone:', phone);
 
       // Find or create user
       let user = await User.findOne({ phone });
 
       // Enforce: Admins must use email/password (no OTP)
       if (user && user.role === UserRole.ADMIN) {
+        console.warn('⚠️  Admin attempted OTP login:', phone);
         throw new AppError(403, 'Admins must login with email and password');
       }
 
       if (!user) {
+        console.log('👤 Creating new user:', { phone, firebaseUid });
         // Create new user with Firebase UID
         user = await User.create({
           phone,
@@ -80,10 +122,15 @@ export const authService = {
           coinBalance: 0,
           profile: {},
         });
+        console.log('✅ New user created:', user.id);
       } else if (!user.firebaseUid) {
+        console.log('🔄 Updating existing user with Firebase UID:', user.id);
         // Update existing user with Firebase UID if missing
         user.firebaseUid = firebaseUid;
         await user.save();
+        console.log('✅ User updated with Firebase UID');
+      } else {
+        console.log('✅ Existing user found:', user.id);
       }
 
       // Return only user; client should send Firebase ID token on subsequent requests
@@ -101,6 +148,7 @@ export const authService = {
       };
     } catch (error) {
       if (error instanceof AppError) throw error;
+      console.error('❌ Unexpected error in verifyFirebaseToken:', error);
       throw new AppError(401, 'Invalid Firebase token');
     }
   },
