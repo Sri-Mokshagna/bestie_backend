@@ -47,6 +47,8 @@ export const chatController = {
               chatId: lastMessage.chatId.toString(),
               senderId: lastMessage.senderId.toString(),
               content: lastMessage.content,
+              type: (lastMessage as any).type || 'text',
+              metadata: (lastMessage as any).metadata || null,
               createdAt: lastMessage.createdAt,
               readAt: lastMessage.readAt,
             } : null,
@@ -96,11 +98,13 @@ export const chatController = {
     const total = await Message.countDocuments({ chatId: roomId });
 
     // Format messages with string IDs
-    const formattedMessages = messages.map(msg => ({
+    const formattedMessages = messages.map((msg: any) => ({
       id: msg._id.toString(),
       chatId: msg.chatId.toString(),
       senderId: msg.senderId.toString(),
       content: msg.content,
+      type: msg.type || 'text',
+      metadata: msg.metadata || null,
       createdAt: msg.createdAt,
       readAt: msg.readAt,
     }));

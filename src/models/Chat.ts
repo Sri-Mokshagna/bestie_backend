@@ -1,9 +1,24 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
+export enum MessageType {
+  TEXT = 'text',
+  AUDIO = 'audio',
+  VIDEO = 'video',
+  IMAGE = 'image',
+  CALL = 'call',
+}
+
 export interface IMessage extends Document {
   chatId: Types.ObjectId;
   senderId: Types.ObjectId;
   content: string;
+  type: MessageType;
+  metadata?: {
+    callType?: 'audio' | 'video';
+    duration?: number;
+    status?: 'completed' | 'missed' | 'declined';
+    [key: string]: any;
+  };
   coinsCharged: number;
   readAt?: Date;
   createdAt: Date;
@@ -33,6 +48,15 @@ const messageSchema = new Schema<IMessage>(
     content: {
       type: String,
       required: true,
+    },
+    type: {
+      type: String,
+      enum: Object.values(MessageType),
+      default: MessageType.TEXT,
+    },
+    metadata: {
+      type: Schema.Types.Mixed,
+      default: null,
     },
     coinsCharged: {
       type: Number,

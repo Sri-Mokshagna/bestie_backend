@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { Call, CallType, CallStatus } from '../../models/Call';
 import { User } from '../../models/User';
+import { Chat, Message, MessageType } from '../../models/Chat';
 import { AppError } from '../../middleware/errorHandler';
 import { logger } from '../../lib/logger';
 import { emitToUser } from '../../lib/socket';
@@ -163,7 +164,11 @@ export const callService = {
     }
 
     call.status = CallStatus.REJECTED;
+    call.endTime = new Date();
     await call.save();
+
+    // Create call history message for declined call
+    await this.createCallMessage(call);
 
     return call;
   },
@@ -202,6 +207,9 @@ export const callService = {
 
     call.status = CallStatus.ENDED;
     await call.save();
+
+    // Create call history message in chat
+    await this.createCallMessage(call);
 
     // Emit socket event to both parties that call has ended
     emitToUser(call.userId.toString(), 'call_ended', {
@@ -282,19 +290,19 @@ export const callService = {
     const now = new Date();
     const sixtySecondsAgo = new Date(now.getTime() - 60000);
 
-    // Mark old ringing calls as missed
-    const ringingResult = await Call.updateMany(
-      {
-        status: CallStatus.RINGING,
-        createdAt: { $lt: sixtySecondsAgo },
-      },
-      {
-        $set: {
-          status: CallStatus.MISSED,
-          endTime: now,
-        },
-      }
-    );
+    // Find old ringing calls to mark as missed
+    const ringingCalls = await Call.find({
+      status: CallStatus.RINGING,
+      createdAt: { $lt: sixtySecondsAgo },
+    });
+
+    // Mark old ringing calls as missed and create messages
+    for (const call of ringingCalls) {
+      call.status = CallStatus.MISSED;
+      call.endTime = now;
+      await call.save();
+      await this.createCallMessage(call);
+    }
 
     // Mark old active calls as ended (shouldn't happen, but just in case)
     const activeResult = await Call.updateMany(
@@ -311,7 +319,7 @@ export const callService = {
     );
 
     return {
-      ringingCallsCleaned: ringingResult.modifiedCount,
+      ringingCallsCleaned: ringingCalls.length,
       activeCallsCleaned: activeResult.modifiedCount,
     };
   },
@@ -321,5 +329,95 @@ export const callService = {
     // This requires ZEGO_APP_ID and ZEGO_SERVER_SECRET
     // For now, return a placeholder
     return `token_${userId}_${roomId}`;
+  },
+
+  async createCallMessage(call: any) {
+    try {
+      // Find or create chat between user and responder
+      let chat = await Chat.findOne({
+        participants: { $all: [call.userId, call.responderId] },
+      });
+
+      if (!chat) {
+        chat = await Chat.create({
+          participants: [call.userId, call.responderId],
+          lastMessageAt: new Date(),
+        });
+      }
+
+      // Determine call status for message
+      let status: 'completed' | 'missed' | 'declined';
+      let content: string;
+
+      if (call.status === CallStatus.ENDED) {
+        status = 'completed';
+        const duration = call.durationSeconds || 0;
+        const minutes = Math.floor(duration / 60);
+        const seconds = duration % 60;
+        content = `${call.type} call ${minutes > 0 ? `${minutes}m ` : ''}${seconds}s`;
+      } else if (call.status === CallStatus.REJECTED) {
+        status = 'declined';
+        content = `${call.type} call declined`;
+      } else if (call.status === CallStatus.MISSED) {
+        status = 'missed';
+        content = `Missed ${call.type} call`;
+      } else {
+        return; // Don't create message for other statuses
+      }
+
+      // Create call message
+      const message = await Message.create({
+        chatId: chat._id,
+        senderId: call.userId,
+        content,
+        type: MessageType.CALL,
+        metadata: {
+          callType: call.type,
+          duration: call.durationSeconds || 0,
+          status,
+          callId: String(call._id),
+        },
+        coinsCharged: 0,
+      });
+
+      // Update chat's last message time
+      chat.lastMessageAt = new Date();
+      await chat.save();
+
+      logger.info({ msg: 'Created call history message', callId: String(call._id), messageId: String(message._id) });
+
+      // Emit socket event for new message
+      emitToUser(call.userId.toString(), 'new_message', {
+        chatId: String(chat._id),
+        message: {
+          id: String(message._id),
+          chatId: String(message.chatId),
+          senderId: String(message.senderId),
+          content: message.content,
+          type: message.type,
+          metadata: message.metadata,
+          createdAt: message.createdAt,
+          readAt: message.readAt,
+        },
+      });
+
+      emitToUser(call.responderId.toString(), 'new_message', {
+        chatId: String(chat._id),
+        message: {
+          id: String(message._id),
+          chatId: String(message.chatId),
+          senderId: String(message.senderId),
+          content: message.content,
+          type: message.type,
+          metadata: message.metadata,
+          createdAt: message.createdAt,
+          readAt: message.readAt,
+        },
+      });
+
+    } catch (error) {
+      logger.error({ msg: 'Failed to create call message', error, callId: String(call._id) });
+      // Don't throw - message creation is not critical
+    }
   },
 };
