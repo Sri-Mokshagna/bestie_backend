@@ -102,10 +102,19 @@ async function start() {
     // Start server - Listen on all network interfaces (0.0.0.0)
     const port = typeof PORT === 'string' ? parseInt(PORT) : PORT;
     httpServer.listen(port, '0.0.0.0', () => {
+      const isProduction = process.env.NODE_ENV === 'production';
+      const renderUrl = process.env.RENDER_EXTERNAL_URL;
+      
       logger.info(`🚀 Server running on port ${port}`);
       logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`🔗 Health check: http://localhost:${port}/healthz`);
-      logger.info(`🌐 Network: http://192.168.0.106:${port}/healthz`);
+      
+      if (isProduction && renderUrl) {
+        logger.info(`🔗 Health check: ${renderUrl}/healthz`);
+        logger.info(`🌐 External URL: ${renderUrl}`);
+      } else {
+        logger.info(`🔗 Health check: http://localhost:${port}/healthz`);
+        logger.info(`🌐 Network: http://192.168.0.106:${port}/healthz`);
+      }
     });
   } catch (error) {
     logger.error(`Failed to start server: ${error}`);
