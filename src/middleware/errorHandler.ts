@@ -2,12 +2,20 @@ import { Request, Response, NextFunction } from 'express';
 import { logger } from '../lib/logger';
 
 export class AppError extends Error {
+  public code?: string;
+  
   constructor(
     public statusCode: number,
     public message: string,
-    public isOperational = true
+    codeOrOperational?: string | boolean
   ) {
     super(message);
+    
+    // Handle both old signature (boolean) and new signature (string code)
+    if (typeof codeOrOperational === 'string') {
+      this.code = codeOrOperational;
+    }
+    
     Object.setPrototypeOf(this, AppError.prototype);
   }
 }
@@ -22,13 +30,20 @@ export const errorHandler = (
     logger.error({
       statusCode: err.statusCode,
       message: err.message,
+      code: err.code,
       path: req.path,
       method: req.method,
     });
 
-    return res.status(err.statusCode).json({
+    const response: any = {
       error: err.message,
-    });
+    };
+    
+    if (err.code) {
+      response.code = err.code;
+    }
+
+    return res.status(err.statusCode).json(response);
   }
 
   // Unhandled errors

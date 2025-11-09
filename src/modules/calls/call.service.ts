@@ -5,6 +5,7 @@ import { Chat, Message, MessageType } from '../../models/Chat';
 import { AppError } from '../../middleware/errorHandler';
 import { logger } from '../../lib/logger';
 import { emitToUser } from '../../lib/socket';
+import { coinService } from '../../services/coinService';
 
 // Make call metering optional based on Redis availability
 const REDIS_ENABLED = process.env.REDIS_ENABLED !== 'false';
@@ -28,11 +29,18 @@ export const callService = {
       throw new AppError(404, 'User not found');
     }
 
-    // TODO: Re-enable coin checking when coins feature is ready
-    // const minCoins = type === CallType.AUDIO ? 10 : 60;
-    // if (user.coinBalance < minCoins) {
-    //   throw new AppError(400, 'Insufficient coins for call');
-    // }
+    // Check if call type is enabled
+    const featureName = type === CallType.AUDIO ? 'audioCall' : 'videoCall';
+    const isEnabled = await coinService.isFeatureEnabled(featureName);
+    if (!isEnabled) {
+      throw new AppError(403, `${type} calls are currently disabled`, 'FEATURE_DISABLED');
+    }
+
+    // Check if user has sufficient coins for at least 1 minute
+    const rate = await coinService.getCallRate(type === CallType.AUDIO ? 'audio' : 'video');
+    if (user.coinBalance < rate) {
+      throw new AppError(400, 'Insufficient coins for call. Please purchase more coins.', 'INSUFFICIENT_COINS');
+    }
 
     // Find responder user (responderId is the User._id with role 'responder')
     const responderUser = await User.findById(responderId);
@@ -166,6 +174,12 @@ export const callService = {
     call.status = CallStatus.REJECTED;
     call.endTime = new Date();
     await call.save();
+
+    // Notify caller that call was rejected
+    emitToUser(call.userId.toString(), 'call_ended', {
+      callId: String(call._id),
+      reason: 'rejected',
+    });
 
     // Create call history message for declined call
     await this.createCallMessage(call);

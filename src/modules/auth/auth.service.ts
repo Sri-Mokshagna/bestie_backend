@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import { admin } from '../../lib/firebase';
 import { User, UserRole } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
+import { coinService } from '../../services/coinService';
 
 export const authService = {
   // Admin login with email/password
@@ -128,6 +129,17 @@ export const authService = {
           firebaseUid: user.firebaseUid,
           role: user.role,
         });
+        
+        // Initialize user with default coins
+        try {
+          await coinService.initializeUserCoins(user.id);
+          // Refresh user to get updated balance
+          user = await User.findById(user.id) as any;
+          console.log('💰 Initial coins credited:', user.coinBalance);
+        } catch (coinError) {
+          console.error('⚠️  Failed to initialize coins:', coinError);
+          // Don't fail user creation if coin initialization fails
+        }
       } else if (!user.firebaseUid) {
         console.log('🔄 Updating existing user with Firebase UID:', user.id);
         // Update existing user with Firebase UID if missing

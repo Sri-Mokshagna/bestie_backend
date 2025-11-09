@@ -2,15 +2,9 @@ import { Server as SocketServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { Chat, Message } from '../../models/Chat';
 import { User } from '../../models/User';
-import { walletService } from '../wallet/wallet.service';
-import { TransactionType } from '../../models/Transaction';
+import { coinService } from '../../services/coinService';
 import { logger } from '../../lib/logger';
 import { getAuth } from 'firebase-admin/auth';
-
-const CHAT_COINS_PER_MESSAGE = parseInt(
-  process.env.CHAT_COINS_PER_MESSAGE || '3',
-  10
-);
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -129,36 +123,52 @@ export function initializeChatSocket(io: SocketServer) {
           return;
         }
 
-        // Check user balance
-        const user = await User.findById(socket.userId);
-        if (!user) {
-          socket.emit('error', { message: 'User not found' });
+        // Get the other participant (responder)
+        const responderId = chat.participants.find(
+          (p) => p.toString() !== socket.userId
+        );
+
+        if (!responderId) {
+          socket.emit('error', { message: 'Responder not found' });
           return;
         }
 
-        if (user.coinBalance < CHAT_COINS_PER_MESSAGE) {
+        // Check if chat is enabled
+        const chatEnabled = await coinService.isFeatureEnabled('chat');
+        if (!chatEnabled) {
           socket.emit('error', {
-            message: 'Insufficient coins',
-            code: 'INSUFFICIENT_COINS',
+            message: 'Chat feature is currently disabled',
+            code: 'FEATURE_DISABLED',
           });
           return;
         }
 
-        // Deduct coins
-        await walletService.deductCoins(
-          socket.userId,
-          CHAT_COINS_PER_MESSAGE,
-          TransactionType.CHAT,
-          undefined,
-          { chatId: roomId }
-        );
+        // Deduct coins and get config
+        let result;
+        try {
+          result = await coinService.deductForChat(
+            socket.userId,
+            responderId.toString(),
+            roomId
+          );
+        } catch (error: any) {
+          if (error.code === 'INSUFFICIENT_COINS') {
+            socket.emit('error', {
+              message: 'No coins left. Please purchase more coins to continue chatting.',
+              code: 'INSUFFICIENT_COINS',
+            });
+            return;
+          }
+          throw error;
+        }
 
         // Create message
         const message = await Message.create({
           chatId: roomId,
           senderId: socket.userId,
-          body,
-          coinsCharged: CHAT_COINS_PER_MESSAGE,
+          content: body,
+          type: 'text',
+          coinsCharged: result.coinsDeducted,
         });
 
         // Update chat last message time
@@ -173,8 +183,14 @@ export function initializeChatSocket(io: SocketServer) {
         // Broadcast to room
         io.to(roomId).emit('new_message', populatedMessage);
 
+        // Send updated balance to sender
+        socket.emit('coin_balance_updated', {
+          balance: result.balance,
+          coinsDeducted: result.coinsDeducted,
+        });
+
         logger.info(
-          `Message sent in room ${roomId} by user ${socket.userId}`
+          `Message sent in room ${roomId} by user ${socket.userId}, coins deducted: ${result.coinsDeducted}`
         );
       } catch (error) {
         logger.error(`Send message error: ${error}`);

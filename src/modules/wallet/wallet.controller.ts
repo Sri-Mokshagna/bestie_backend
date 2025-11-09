@@ -1,7 +1,10 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middleware/auth';
 import { walletService } from './wallet.service';
+import { coinService } from '../../services/coinService';
+import { paymentGateway } from '../../services/paymentGateway';
 import { AppError } from '../../middleware/errorHandler';
+import { TransactionType } from '../../models/Transaction';
 
 export const walletController = {
   async getBalance(req: AuthRequest, res: Response) {
@@ -77,5 +80,102 @@ export const walletController = {
     );
 
     res.json(result);
+  },
+
+  /**
+   * Create payment order for coin purchase
+   */
+  async createPaymentOrder(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { planId } = req.body;
+
+    if (!planId) {
+      throw new AppError(400, 'Plan ID is required');
+    }
+
+    // Get coin plan
+    const plans = await walletService.getCoinPlans();
+    const plan = plans.find((p) => p._id.toString() === planId);
+
+    if (!plan) {
+      throw new AppError(404, 'Coin plan not found');
+    }
+
+    // Create payment order
+    const order = await paymentGateway.createOrder(
+      plan.priceINR,
+      'INR',
+      `coins_${req.user.id}_${Date.now()}`
+    );
+
+    res.json({
+      order: {
+        orderId: order.orderId,
+        amount: order.amount,
+        currency: order.currency,
+      },
+      plan: {
+        id: plan._id,
+        name: plan.name,
+        coins: plan.coins,
+        priceINR: plan.priceINR,
+      },
+    });
+  },
+
+  /**
+   * Verify payment and credit coins
+   */
+  async verifyPaymentAndCredit(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { orderId, paymentId, signature, planId } = req.body;
+
+    if (!orderId || !paymentId || !signature || !planId) {
+      throw new AppError(400, 'Missing required fields');
+    }
+
+    // Verify payment signature
+    const isValid = await paymentGateway.verifyPayment({
+      orderId,
+      paymentId,
+      signature,
+    });
+
+    if (!isValid) {
+      throw new AppError(400, 'Invalid payment signature', 'PAYMENT_VERIFICATION_FAILED');
+    }
+
+    // Get coin plan
+    const plans = await walletService.getCoinPlans();
+    const plan = plans.find((p) => p._id.toString() === planId);
+
+    if (!plan) {
+      throw new AppError(404, 'Coin plan not found');
+    }
+
+    // Credit coins to user
+    const newBalance = await coinService.creditCoins(
+      req.user.id,
+      plan.coins,
+      TransactionType.PURCHASE,
+      {
+        orderId,
+        paymentId,
+        planId,
+        priceINR: plan.priceINR,
+      }
+    );
+
+    res.json({
+      message: 'Payment verified and coins credited successfully',
+      balance: newBalance,
+      coinsAdded: plan.coins,
+    });
   },
 };

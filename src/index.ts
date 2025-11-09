@@ -20,6 +20,9 @@ import chatRoutes from './modules/chat/chat.routes';
 import responderRoutes from './modules/responder/responder.routes';
 import uploadRoutes from './modules/upload/upload.routes';
 import notificationRoutes from './modules/notifications/notification.routes';
+import payoutRoutes from './modules/responder/payout.routes';
+import coinConfigRoutes from './modules/admin/coinConfig.routes';
+import admobRoutes from './modules/admob/admob.routes';
 
 // Initialize jobs (only if Redis is available)
 // import './jobs/callMetering'; // Disabled for now - enable when Redis is ready
@@ -81,6 +84,9 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/responders', responderRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/payouts', payoutRoutes);
+app.use('/api/admin/coin-config', coinConfigRoutes);
+app.use('/api/admob', admobRoutes);
 
 // Initialize Socket.IO
 setSocketIO(io);
