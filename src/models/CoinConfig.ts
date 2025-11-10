@@ -96,7 +96,6 @@ const coinConfigSchema = new Schema<ICoinConfig>(
     isActive: {
       type: Boolean,
       default: true,
-      index: true,
     },
     createdBy: {
       type: String,

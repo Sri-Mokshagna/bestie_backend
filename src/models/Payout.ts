@@ -39,7 +39,6 @@ const payoutSchema = new Schema<IPayout>(
       type: String,
       enum: Object.values(PayoutStatus),
       default: PayoutStatus.PENDING,
-      index: true,
     },
     gatewayResponse: Schema.Types.Mixed,
     completedAt: Date,
