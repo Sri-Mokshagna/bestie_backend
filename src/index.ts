@@ -22,6 +22,10 @@ import uploadRoutes from './modules/upload/upload.routes';
 import notificationRoutes from './modules/notifications/notification.routes';
 import payoutRoutes from './modules/responder/payout.routes';
 import coinConfigRoutes from './modules/admin/coinConfig.routes';
+import adminRoutes from './modules/admin/admin.routes';
+import promotionRoutes from './modules/admin/promotion.routes';
+import profileRoutes from './modules/profile/profile.routes';
+import supportRoutes from './modules/support/support.routes';
 import admobRoutes from './modules/admob/admob.routes';
 
 // Initialize jobs (only if Redis is available)
@@ -85,7 +89,11 @@ app.use('/api/responders', responderRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/payouts', payoutRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/support', supportRoutes);
 app.use('/api/admin/coin-config', coinConfigRoutes);
+app.use('/api/admin/promotions', promotionRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/admob', admobRoutes);
 
 // Initialize Socket.IO
