@@ -21,6 +21,17 @@ export interface IUserProfile {
   voiceBlob?: string;
 }
 
+export interface INotificationPreferences {
+  pushEnabled: boolean;
+  emailEnabled: boolean;
+  smsEnabled: boolean;
+  callNotifications: boolean;
+  chatNotifications: boolean;
+  payoutNotifications: boolean;
+  promotionNotifications: boolean;
+  systemNotifications: boolean;
+}
+
 export interface IUser extends Document {
   phone: string;
   firebaseUid?: string; // Firebase UID for socket authentication
@@ -31,6 +42,7 @@ export interface IUser extends Document {
   status: UserStatus;
   isOnline: boolean;
   isAvailable: boolean;
+  notificationPreferences?: INotificationPreferences;
   lastOnlineAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -85,6 +97,16 @@ const userSchema = new Schema<IUser>(
     isAvailable: {
       type: Boolean,
       default: true,
+    },
+    notificationPreferences: {
+      pushEnabled: { type: Boolean, default: true },
+      emailEnabled: { type: Boolean, default: false },
+      smsEnabled: { type: Boolean, default: false },
+      callNotifications: { type: Boolean, default: true },
+      chatNotifications: { type: Boolean, default: true },
+      payoutNotifications: { type: Boolean, default: true },
+      promotionNotifications: { type: Boolean, default: true },
+      systemNotifications: { type: Boolean, default: true },
     },
     lastOnlineAt: {
       type: Date,

@@ -1,11 +1,11 @@
 import { Request, Response } from 'express';
-import { SupportTicket } from './support.model';
+import { SupportTicket, TicketStatus } from './support.model';
 import { User } from '../../models/User';
 
 // Create support ticket
 export const createTicket = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.userId;
+    const userId = req.user?.userId;
     const { subject, category, description, priority } = req.body;
 
     if (!subject || !category || !description) {
@@ -31,7 +31,7 @@ export const createTicket = async (req: Request, res: Response) => {
 // Get user's tickets
 export const getUserTickets = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.userId;
+    const userId = req.user?.userId;
     const { status, page = 1, limit = 20 } = req.query;
 
     const query: any = { userId };
@@ -64,7 +64,7 @@ export const getUserTickets = async (req: Request, res: Response) => {
 // Get ticket details
 export const getTicketDetails = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.userId;
+    const userId = req.user?.userId;
     const { ticketId } = req.params;
 
     const ticket = await SupportTicket.findOne({
@@ -86,7 +86,7 @@ export const getTicketDetails = async (req: Request, res: Response) => {
 // Add reply to ticket
 export const addReply = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.userId;
+    const userId = req.user?.userId;
     const { ticketId } = req.params;
     const { message } = req.body;
 
@@ -204,7 +204,7 @@ export const addAdminReply = async (req: Request, res: Response) => {
     });
 
     ticket.lastReplyAt = new Date();
-    ticket.status = 'in_progress';
+    ticket.status = TicketStatus.IN_PROGRESS;
     await ticket.save();
 
     res.json({ ticket });

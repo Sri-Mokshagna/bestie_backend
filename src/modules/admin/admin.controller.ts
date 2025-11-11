@@ -41,7 +41,7 @@ export const getAllUsers = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Get all users error:', error);
+    logger.error('Get all users error', error);
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 };
@@ -102,7 +102,7 @@ export const getUserDetails = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Get user details error:', error);
+    logger.error('Get user details error', error);
     res.status(500).json({ error: 'Failed to fetch user details' });
   }
 };
@@ -167,7 +167,7 @@ export const getAllResponders = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Get all responders error:', error);
+    logger.error('Get all responders error', error);
     res.status(500).json({ error: 'Failed to fetch responders' });
   }
 };
@@ -230,7 +230,7 @@ export const getResponderDetails = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Get responder details error:', error);
+    logger.error('Get responder details error', error);
     res.status(500).json({ error: 'Failed to fetch responder details' });
   }
 };
@@ -304,7 +304,7 @@ export const getDashboardAnalytics = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Get dashboard analytics error:', error);
+    logger.error('Get dashboard analytics error', error);
     res.status(500).json({ error: 'Failed to fetch analytics' });
   }
 };
@@ -340,7 +340,7 @@ export const getRevenueAnalytics = async (req: Request, res: Response) => {
 
     res.json({ revenueData });
   } catch (error) {
-    logger.error('Get revenue analytics error:', error);
+    logger.error('Get revenue analytics error', error);
     res.status(500).json({ error: 'Failed to fetch revenue analytics' });
   }
 };
@@ -357,7 +357,7 @@ export const getCommissionSettings = async (req: Request, res: Response) => {
       coinToINRRate: 1, // 1 coin = 1 INR
     });
   } catch (error) {
-    logger.error('Get commission settings error:', error);
+    logger.error('Get commission settings error', error);
     res.status(500).json({ error: 'Failed to fetch commission settings' });
   }
 };
@@ -384,7 +384,7 @@ export const updateCommissionSettings = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Update commission settings error:', error);
+    logger.error('Update commission settings error', error);
     res.status(500).json({ error: 'Failed to update commission settings' });
   }
 };
