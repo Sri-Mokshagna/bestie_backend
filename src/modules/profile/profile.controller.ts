@@ -4,7 +4,7 @@ import { User } from '../../models/User';
 // Get notification preferences
 export const getNotificationPreferences = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId;
+    const userId = req.user?.id;
     
     const user = await User.findById(userId).select('notificationPreferences');
     if (!user) {
@@ -33,7 +33,7 @@ export const getNotificationPreferences = async (req: Request, res: Response) =>
 // Update notification preferences
 export const updateNotificationPreferences = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId;
+    const userId = req.user?.id;
     const preferences = req.body;
 
     const user = await User.findById(userId);

@@ -1,11 +1,12 @@
-import { Request } from 'express';
+import { UserRole } from '../models/User';
 
 declare global {
   namespace Express {
     interface Request {
       user?: {
-        userId: string;
-        role: string;
+        id: string;
+        phone: string;
+        role: UserRole;
       };
     }
   }

@@ -1,11 +1,12 @@
 import { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import { SupportTicket, TicketStatus } from './support.model';
 import { User } from '../../models/User';
 
 // Create support ticket
 export const createTicket = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId;
+    const userId = req.user?.id;
     const { subject, category, description, priority } = req.body;
 
     if (!subject || !category || !description) {
@@ -31,7 +32,7 @@ export const createTicket = async (req: Request, res: Response) => {
 // Get user's tickets
 export const getUserTickets = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId;
+    const userId = req.user?.id;
     const { status, page = 1, limit = 20 } = req.query;
 
     const query: any = { userId };
@@ -64,7 +65,7 @@ export const getUserTickets = async (req: Request, res: Response) => {
 // Get ticket details
 export const getTicketDetails = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId;
+    const userId = req.user?.id;
     const { ticketId } = req.params;
 
     const ticket = await SupportTicket.findOne({
@@ -86,7 +87,7 @@ export const getTicketDetails = async (req: Request, res: Response) => {
 // Add reply to ticket
 export const addReply = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId;
+    const userId = req.user?.id;
     const { ticketId } = req.params;
     const { message } = req.body;
 
@@ -104,7 +105,7 @@ export const addReply = async (req: Request, res: Response) => {
     }
 
     ticket.replies.push({
-      userId,
+      userId: new Types.ObjectId(userId),
       message,
       isAdmin: false,
       createdAt: new Date(),
@@ -183,7 +184,7 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
 // Admin: Add admin reply
 export const addAdminReply = async (req: Request, res: Response) => {
   try {
-    const adminId = (req as any).user?.userId;
+    const adminId = req.user?.id;
     const { ticketId } = req.params;
     const { message } = req.body;
 
@@ -197,7 +198,7 @@ export const addAdminReply = async (req: Request, res: Response) => {
     }
 
     ticket.replies.push({
-      userId: adminId,
+      userId: new Types.ObjectId(adminId),
       message,
       isAdmin: true,
       createdAt: new Date(),
