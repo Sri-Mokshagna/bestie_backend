@@ -12,12 +12,21 @@ export const callController = {
 
     const { responderId, type } = req.body;
 
+    // Enhanced logging for debugging
+    console.log('Call initiate request:', {
+      userId: req.user.id,
+      body: req.body,
+      responderId,
+      type,
+      typeOf: typeof type,
+    });
+
     if (!responderId || !type) {
-      throw new AppError(400, 'Missing required fields');
+      throw new AppError(400, `Missing required fields. Received: responderId=${responderId}, type=${type}`);
     }
 
     if (!Object.values(CallType).includes(type)) {
-      throw new AppError(400, 'Invalid call type');
+      throw new AppError(400, `Invalid call type: ${type}. Expected: ${Object.values(CallType).join(' or ')}`);
     }
 
     const call = await callService.initiateCall(
