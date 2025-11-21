@@ -10,29 +10,33 @@ interface CashfreeConfig {
 }
 
 class CashfreeService {
-  private config: CashfreeConfig;
+  private config: CashfreeConfig | null = null;
 
-  constructor() {
-    this.config = {
-      appId: process.env.CASHFREE_APP_ID!,
-      secretKey: process.env.CASHFREE_SECRET_KEY!,
-      baseUrl: process.env.NODE_ENV === 'production' 
-        ? 'https://api.cashfree.com/pg' 
-        : 'https://sandbox.cashfree.com/pg',
-      webhookSecret: process.env.CASHFREE_WEBHOOK_SECRET!,
-    };
+  private initializeConfig() {
+    if (!this.config) {
+      this.config = {
+        appId: process.env.CASHFREE_APP_ID!,
+        secretKey: process.env.CASHFREE_SECRET_KEY!,
+        baseUrl: process.env.NODE_ENV === 'production' 
+          ? 'https://api.cashfree.com/pg' 
+          : 'https://sandbox.cashfree.com/pg',
+        webhookSecret: process.env.CASHFREE_WEBHOOK_SECRET!,
+      };
 
-    if (!this.config.appId || !this.config.secretKey) {
-      throw new Error('Cashfree credentials not configured');
+      if (!this.config.appId || !this.config.secretKey) {
+        throw new Error('Cashfree credentials not configured');
+      }
     }
+    return this.config;
   }
 
   private getHeaders() {
+    const config = this.initializeConfig();
     return {
       'Content-Type': 'application/json',
       'x-api-version': '2023-08-01',
-      'x-client-id': this.config.appId,
-      'x-client-secret': this.config.secretKey,
+      'x-client-id': config.appId,
+      'x-client-secret': config.secretKey,
     };
   }
 
@@ -70,8 +74,9 @@ class CashfreeService {
         },
       };
 
+      const config = this.initializeConfig();
       const response = await axios.post(
-        `${this.config.baseUrl}/orders`,
+        `${config.baseUrl}/orders`,
         payload,
         { headers: this.getHeaders() }
       );
@@ -86,8 +91,9 @@ class CashfreeService {
 
   async getPaymentStatus(orderId: string) {
     try {
+      const config = this.initializeConfig();
       const response = await axios.get(
-        `${this.config.baseUrl}/orders/${orderId}`,
+        `${config.baseUrl}/orders/${orderId}`,
         { headers: this.getHeaders() }
       );
 
@@ -100,8 +106,9 @@ class CashfreeService {
 
   verifyWebhookSignature(rawBody: string, signature: string): boolean {
     try {
+      const config = this.initializeConfig();
       const expectedSignature = crypto
-        .createHmac('sha256', this.config.webhookSecret)
+        .createHmac('sha256', config.webhookSecret)
         .update(rawBody)
         .digest('base64');
 
@@ -123,8 +130,9 @@ class CashfreeService {
         refund_note: 'Refund for order cancellation',
       };
 
+      const config = this.initializeConfig();
       const response = await axios.post(
-        `${this.config.baseUrl}/orders/${orderId}/refunds`,
+        `${config.baseUrl}/orders/${orderId}/refunds`,
         payload,
         { headers: this.getHeaders() }
       );
