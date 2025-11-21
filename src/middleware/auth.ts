@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { User, UserRole } from '../models/User';
+import { User, UserRole, IUserProfile } from '../models/User';
 import { admin } from '../lib/firebase';
 
 export interface AuthRequest extends Request {
@@ -8,6 +8,7 @@ export interface AuthRequest extends Request {
     id: string;
     phone: string;
     role: UserRole;
+    profile?: IUserProfile;
   };
   file?: any;
 }
@@ -50,6 +51,7 @@ export const authenticate = async (
           id: String(user._id),
           phone: user.phone,
           role: user.role,
+          profile: user.profile,
         };
         return next();
       }
@@ -71,7 +73,12 @@ export const authenticate = async (
       return res.status(401).json({ error: 'User not found or inactive' });
     }
 
-    req.user = decoded;
+    req.user = {
+      id: decoded.id,
+      phone: decoded.phone,
+      role: decoded.role,
+      profile: user.profile,
+    };
     return next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
