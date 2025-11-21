@@ -11,6 +11,7 @@ router.post('/:callId/reject', authenticate, asyncHandler(callController.rejectC
 router.post('/:callId/end', authenticate, asyncHandler(callController.endCall));
 router.get('/:callId/status', authenticate, asyncHandler(callController.getCallStatus));
 router.get('/logs/:partnerId', authenticate, asyncHandler(callController.getCallLogs));
+router.get('/history', authenticate, asyncHandler(callController.getCallHistory));
 router.put('/:callId/duration', authenticate, asyncHandler(callController.updateCallDuration));
 router.post('/cleanup', authenticate, asyncHandler(callController.cleanupStaleCalls));
 

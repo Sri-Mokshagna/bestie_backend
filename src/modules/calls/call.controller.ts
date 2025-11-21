@@ -94,6 +94,16 @@ export const callController = {
     res.json({ calls });
   },
 
+  async getCallHistory(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const calls = await callService.getCallHistory(req.user.id);
+
+    res.json({ calls });
+  },
+
   async updateCallDuration(req: AuthRequest, res: Response) {
     if (!req.user) {
       throw new AppError(401, 'Not authenticated');

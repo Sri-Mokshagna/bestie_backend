@@ -4,7 +4,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { notificationService } from '../../lib/notification';
 
 export const responderService = {
-  async getResponders(onlineOnly?: boolean, page = 1, limit = 20) {
+  async getResponders(onlineOnly?: boolean, page = 1, limit = 20, userLanguage?: string) {
     const skip = (page - 1) * limit;
 
     const query: any = {
@@ -31,6 +31,18 @@ export const responderService = {
         };
       })
     );
+
+    // If user has a language preference, prioritize responders with the same language
+    if (userLanguage) {
+      const sameLanguageResponders = respondersWithUsers.filter(
+        (item) => item.user?.profile?.language === userLanguage
+      );
+      const otherLanguageResponders = respondersWithUsers.filter(
+        (item) => item.user?.profile?.language !== userLanguage
+      );
+      
+      return [...sameLanguageResponders, ...otherLanguageResponders];
+    }
 
     return respondersWithUsers;
   },

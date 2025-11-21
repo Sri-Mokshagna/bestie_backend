@@ -146,7 +146,7 @@ export const getAllResponders = async (req: Request, res: Response) => {
     }
 
     if (status) {
-      query['responder.status'] = status;
+      query.status = status;
     }
 
     const responders = await User.find(query)
@@ -240,13 +240,13 @@ export const getDashboardAnalytics = async (req: Request, res: Response) => {
   try {
     // Total users
     const totalUsers = await User.countDocuments({ role: 'user' });
-    const activeUsers = await User.countDocuments({ role: 'user', isActive: true });
+    const activeUsers = await User.countDocuments({ role: 'user', status: 'active' });
 
     // Total responders
     const totalResponders = await User.countDocuments({ role: 'responder' });
     const onlineResponders = await User.countDocuments({
       role: 'responder',
-      'responder.isOnline': true,
+      isOnline: true,
     });
 
     // Active calls

@@ -27,9 +27,13 @@ import promotionRoutes from './modules/admin/promotion.routes';
 import profileRoutes from './modules/profile/profile.routes';
 import supportRoutes from './modules/support/support.routes';
 import admobRoutes from './modules/admob/admob.routes';
+import healthRoutes from './routes/health';
+import paymentRoutes from './modules/payments/payment.routes';
+import redemptionRoutes from './modules/redemption/redemption.routes';
+import commissionRoutes from './modules/admin/commission.routes';
 
 // Initialize jobs (only if Redis is available)
-// import './jobs/callMetering'; // Disabled for now - enable when Redis is ready
+import './jobs/callMetering';
 
 const app = express();
 const httpServer = createServer(app);
@@ -95,6 +99,10 @@ app.use('/api/admin/coin-config', coinConfigRoutes);
 app.use('/api/admin/promotions', promotionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admob', admobRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/redemptions', redemptionRoutes);
+app.use('/api/admin/commission', commissionRoutes);
+app.use('/api', healthRoutes);
 
 // Initialize Socket.IO
 setSocketIO(io);

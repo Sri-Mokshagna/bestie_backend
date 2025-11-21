@@ -73,6 +73,25 @@ export const authController = {
     res.json({ user });
   },
 
+  async updateLanguage(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { language } = req.body;
+    if (!language) {
+      throw new AppError(400, 'Language is required');
+    }
+
+    const validLanguages = ['en', 'hi', 'te', 'ta', 'kn', 'ml', 'mr'];
+    if (!validLanguages.includes(language)) {
+      throw new AppError(400, 'Invalid language code');
+    }
+
+    const user = await authService.updateUserLanguage(req.user.id, language);
+    res.json({ user });
+  },
+
   async updateRole(req: AuthRequest, res: Response) {
     if (!req.user) {
       throw new AppError(401, 'Not authenticated');

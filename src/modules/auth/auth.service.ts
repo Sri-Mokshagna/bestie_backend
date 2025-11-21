@@ -227,6 +227,27 @@ export const authService = {
     };
   },
 
+  async updateUserLanguage(userId: string, language: string) {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new AppError(404, 'User not found');
+    }
+
+    user.profile.language = language;
+    await user.save();
+
+    return {
+      id: user.id,
+      phone: user.phone,
+      role: user.role,
+      coinBalance: user.coinBalance,
+      profile: user.profile,
+      status: user.status,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  },
+
   async updateUserRole(userId: string, role: UserRole, voiceText?: string, voiceBlob?: string) {
     const user = await User.findById(userId);
     if (!user) {

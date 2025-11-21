@@ -7,6 +7,7 @@ export enum TransactionType {
   GIFT = 'gift',
   PAYOUT = 'payout',
   AD_REWARD = 'ad_reward',
+  REFUND = 'refund',
 }
 
 export enum TransactionStatus {

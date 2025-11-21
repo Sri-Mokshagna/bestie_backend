@@ -1,27 +1,57 @@
 import Redis from 'ioredis';
 import { logger } from './logger';
 
-const redisHost = process.env.REDIS_HOST || 'localhost';
-const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
-const REDIS_ENABLED = process.env.REDIS_ENABLED !== 'false'; // Set to 'false' to disable
+const REDIS_ENABLED = process.env.REDIS_ENABLED !== 'false';
+const REDIS_URL = process.env.REDIS_URL;
 
 let redis: Redis | null = null;
 
 if (REDIS_ENABLED) {
-  redis = new Redis({
-    host: redisHost,
-    port: redisPort,
-    maxRetriesPerRequest: 3,
-    retryStrategy: (times) => {
-      if (times > 3) {
-        logger.warn('Redis connection failed after 3 retries. Disabling Redis.');
-        return null; // Stop retrying
-      }
-      const delay = Math.min(times * 50, 2000);
-      return delay;
-    },
-    lazyConnect: true, // Don't connect immediately
-  });
+  try {
+    if (REDIS_URL) {
+      // Production: Use REDIS_URL (from Render Redis service)
+      redis = new Redis(REDIS_URL, {
+        maxRetriesPerRequest: 3,
+        retryStrategy: (times) => {
+          if (times > 3) {
+            logger.error('Redis connection failed after 3 retries. Disabling Redis.');
+            return null;
+          }
+          const delay = Math.min(times * 50, 2000);
+          logger.warn(`Redis retry attempt ${times}, waiting ${delay}ms`);
+          return delay;
+        },
+        lazyConnect: true,
+        // Production settings
+        connectTimeout: 10000,
+        commandTimeout: 5000,
+        // TLS settings for Render Redis
+        tls: REDIS_URL.startsWith('rediss://') ? {} : undefined,
+      });
+    } else {
+      // Development: Use individual host/port
+      const redisHost = process.env.REDIS_HOST || 'localhost';
+      const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
+      
+      redis = new Redis({
+        host: redisHost,
+        port: redisPort,
+        maxRetriesPerRequest: 3,
+        retryStrategy: (times) => {
+          if (times > 3) {
+            logger.warn('Redis connection failed after 3 retries. Disabling Redis.');
+            return null;
+          }
+          const delay = Math.min(times * 50, 2000);
+          return delay;
+        },
+        lazyConnect: true,
+      });
+    }
+  } catch (error) {
+    logger.error({ error }, 'Failed to initialize Redis');
+    redis = null;
+  }
 } else {
   logger.warn('⚠️  Redis is DISABLED. Call metering and job queues will not work.');
 }
@@ -43,6 +73,7 @@ if (redis) {
   redis.connect().catch((err) => {
     logger.error({ err: err.message }, 'Failed to connect to Redis');
     logger.warn('Continuing without Redis. Call metering will not work.');
+    redis = null; // Set to null on connection failure
   });
 
   process.on('SIGINT', async () => {

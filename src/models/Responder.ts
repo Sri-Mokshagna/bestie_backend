@@ -20,6 +20,7 @@ export interface IKycDocs {
 export interface IEarnings {
   totalCoins: number;
   pendingCoins: number;
+  lockedCoins: number;
   redeemedCoins: number;
 }
 
@@ -65,6 +66,7 @@ const responderSchema = new Schema<IResponder>(
     earnings: {
       totalCoins: { type: Number, default: 0 },
       pendingCoins: { type: Number, default: 0 },
+      lockedCoins: { type: Number, default: 0 },
       redeemedCoins: { type: Number, default: 0 },
     },
     rating: {

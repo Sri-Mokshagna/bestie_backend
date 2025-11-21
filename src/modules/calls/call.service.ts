@@ -276,6 +276,38 @@ export const callService = {
     }));
   },
 
+  async getCallHistory(userId: string) {
+    // Find all calls where user was involved (as user or responder)
+    const calls = await Call.find({
+      $or: [
+        { userId: userId },
+        { responderId: userId },
+      ],
+      status: { $in: [CallStatus.ENDED, CallStatus.REJECTED, CallStatus.MISSED] },
+    })
+      .populate('userId', 'profile phone')
+      .populate('responderId', 'profile phone')
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Format calls with populated user data
+    return calls.map(call => ({
+      id: String(call._id),
+      userId: call.userId._id.toString(),
+      responderId: call.responderId._id.toString(),
+      user: call.userId,
+      responder: call.responderId,
+      type: call.type,
+      status: call.status,
+      startTime: call.startTime,
+      endTime: call.endTime,
+      duration: call.durationSeconds || 0,
+      coinsCharged: call.coinsCharged,
+      createdAt: call.createdAt,
+    }));
+  },
+
   async updateCallDuration(callId: string, durationSeconds: number) {
     const call = await Call.findById(callId);
 

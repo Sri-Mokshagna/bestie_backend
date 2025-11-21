@@ -17,6 +17,7 @@ export interface IUserProfile {
   bio?: string;
   avatar?: string;
   gender?: string;
+  language?: string;
   voiceText?: string;
   voiceBlob?: string;
 }
@@ -77,6 +78,7 @@ const userSchema = new Schema<IUser>(
       bio: String,
       avatar: String,
       gender: String,
+      language: String,
       voiceText: String,
       voiceBlob: String,
     },

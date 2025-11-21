@@ -8,11 +8,13 @@ export const responderController = {
     const onlineOnly = req.query.onlineOnly === 'true';
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
+    const userLanguage = req.user?.profile?.language;
 
     const responders = await responderService.getResponders(
       onlineOnly,
       page,
-      limit
+      limit,
+      userLanguage
     );
 
     res.json({ responders });

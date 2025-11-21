@@ -20,6 +20,9 @@ router.get('/me', authenticate, asyncHandler(authController.getMe));
 // Update user gender
 router.put('/update-gender', authenticate, asyncHandler(authController.updateGender));
 
+// Update user language
+router.put('/update-language', authenticate, asyncHandler(authController.updateLanguage));
+
 // Update user role
 router.put('/update-role', authenticate, asyncHandler(authController.updateRole));
 
