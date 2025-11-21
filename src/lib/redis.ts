@@ -11,7 +11,7 @@ if (REDIS_ENABLED) {
     if (REDIS_URL) {
       // Production: Use REDIS_URL (from Render Redis service)
       redis = new Redis(REDIS_URL, {
-        maxRetriesPerRequest: 3,
+        maxRetriesPerRequest: null, // Required for BullMQ blocking operations
         retryStrategy: (times) => {
           if (times > 3) {
             logger.error('Redis connection failed after 3 retries. Disabling Redis.');
@@ -36,7 +36,7 @@ if (REDIS_ENABLED) {
       redis = new Redis({
         host: redisHost,
         port: redisPort,
-        maxRetriesPerRequest: 3,
+        maxRetriesPerRequest: null, // Required for BullMQ blocking operations
         retryStrategy: (times) => {
           if (times > 3) {
             logger.warn('Redis connection failed after 3 retries. Disabling Redis.');
