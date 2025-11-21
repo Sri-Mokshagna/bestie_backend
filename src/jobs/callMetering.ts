@@ -1,5 +1,5 @@
 import { Queue, Worker } from 'bullmq';
-import redis from '../lib/redis';
+import redis, { bullmqRedis } from '../lib/redis';
 import { Call, CallType, CallStatus } from '../models/Call';
 import { User } from '../models/User';
 import { coinService } from '../services/coinService';
@@ -13,9 +13,9 @@ const REDIS_ENABLED = process.env.REDIS_ENABLED !== 'false';
 let callMeteringQueue: Queue | undefined;
 let callMeteringWorker: Worker | undefined;
 
-if (REDIS_ENABLED && redis) {
+if (REDIS_ENABLED && bullmqRedis) {
   callMeteringQueue = new Queue('call-metering', {
-    connection: redis as any,
+    connection: bullmqRedis as any,
   });
 
   callMeteringWorker = new Worker(
@@ -110,7 +110,7 @@ if (REDIS_ENABLED && redis) {
       }
     },
     {
-      connection: redis as any,
+      connection: bullmqRedis as any,
       concurrency: 10,
     }
   );
