@@ -73,8 +73,8 @@ async function analyzeResponderDataStructure() {
       
       // Check for null fields that might cause Flutter issues
       if (!responder.userId) issues.push('userId is null');
-      if (!responder.status) issues.push('status is null');
-      if (!responder.applicationDate) issues.push('applicationDate is null');
+      if (!responder.kycStatus) issues.push('kycStatus is null');
+      if (!responder.createdAt) issues.push('createdAt is null');
       
       if (issues.length > 0) {
         logger.warn({ 
@@ -84,7 +84,7 @@ async function analyzeResponderDataStructure() {
       } else {
         logger.info({ 
           responderId: responder._id,
-          status: responder.status
+          kycStatus: responder.kycStatus
         }, '✅ Responder data clean');
       }
     }
@@ -293,15 +293,19 @@ async function generateFlutterFixes() {
   logger.info('class Responder {');
   logger.info('  final String id;');
   logger.info('  final String userId;');
-  logger.info('  final String status;');
-  logger.info('  final DateTime applicationDate;');
+  logger.info('  final KycStatus kycStatus;');
+  logger.info('  final bool isOnline;');
+  logger.info('  final double rating;');
+  logger.info('  final DateTime createdAt;');
   logger.info('');
   logger.info('  factory Responder.fromJson(Map<String, dynamic> json) {');
   logger.info('    return Responder(');
   logger.info('      id: json[\'_id\'] ?? \'\',');
   logger.info('      userId: json[\'userId\'] ?? \'\',');
-  logger.info('      status: json[\'status\'] ?? \'pending\',');
-  logger.info('      applicationDate: DateTime.tryParse(json[\'applicationDate\'] ?? \'\') ?? DateTime.now(),');
+  logger.info('      kycStatus: _parseKycStatus(json[\'kycStatus\']),');
+  logger.info('      isOnline: json[\'isOnline\'] ?? false,');
+  logger.info('      rating: (json[\'rating\'] ?? 0).toDouble(),');
+  logger.info('      createdAt: DateTime.tryParse(json[\'createdAt\'] ?? \'\') ?? DateTime.now(),');
   logger.info('    );');
   logger.info('  }');
   logger.info('}');
