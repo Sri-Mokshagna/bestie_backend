@@ -10,6 +10,9 @@ router.post('/:callId/accept', authenticate, asyncHandler(callController.acceptC
 router.post('/:callId/reject', authenticate, asyncHandler(callController.rejectCall));
 router.post('/:callId/end', authenticate, asyncHandler(callController.endCall));
 router.get('/:callId/status', authenticate, asyncHandler(callController.getCallStatus));
+router.get('/:callId/token', authenticate, asyncHandler(callController.getZegoToken));
+router.post('/:callId/confirm', authenticate, asyncHandler(callController.confirmConnection));
+router.post('/:callId/failure', authenticate, asyncHandler(callController.reportConnectionFailure));
 router.get('/logs/:partnerId', authenticate, asyncHandler(callController.getCallLogs));
 router.get('/history', authenticate, asyncHandler(callController.getCallHistory));
 router.put('/:callId/duration', authenticate, asyncHandler(callController.updateCallDuration));

@@ -121,6 +121,60 @@ export const callController = {
     res.json({ call });
   },
 
+  async confirmConnection(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { callId } = req.params;
+
+    const call = await callService.confirmCallConnection(callId, req.user.id);
+
+    res.json({ call });
+  },
+
+  async reportConnectionFailure(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { callId } = req.params;
+    const { reason } = req.body;
+
+    const call = await callService.handleCallConnectionFailure(
+      callId, 
+      req.user.id, 
+      reason || 'Unknown connection error'
+    );
+
+    res.json({ call });
+  },
+
+  // Get ZEGO token for call
+  async getZegoToken(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { callId } = req.params;
+
+    // Verify call exists and user is participant
+    const call = await callService.getCallStatus(callId);
+    
+    if (call.userId.toString() !== req.user.id && 
+        call.responderId.toString() !== req.user.id) {
+      throw new AppError(403, 'Not authorized');
+    }
+
+    const token = callService.generateZegoToken(req.user.id, call.zegoRoomId);
+    
+    res.json({ 
+      token,
+      roomId: call.zegoRoomId,
+      userId: req.user.id
+    });
+  },
+
   // Cleanup endpoint - mark old ringing calls as missed
   async cleanupStaleCalls(req: AuthRequest, res: Response) {
     const result = await callService.cleanupStaleCalls();

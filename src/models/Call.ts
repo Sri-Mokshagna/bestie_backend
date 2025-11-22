@@ -7,6 +7,7 @@ export enum CallType {
 
 export enum CallStatus {
   RINGING = 'ringing',
+  CONNECTING = 'connecting',
   ACTIVE = 'active',
   ENDED = 'ended',
   REJECTED = 'rejected',

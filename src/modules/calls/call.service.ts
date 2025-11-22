@@ -11,12 +11,15 @@ import { coinService } from '../../services/coinService';
 const REDIS_ENABLED = process.env.REDIS_ENABLED !== 'false';
 
 async function getCallMeteringQueue() {
-  if (!REDIS_ENABLED) return null;
+  if (!REDIS_ENABLED) {
+    logger.debug('Call metering disabled - Redis not enabled');
+    return null;
+  }
   try {
     const mod = await import('../../jobs/callMetering');
     return mod.callMeteringQueue as any;
   } catch (error) {
-    logger.warn({ msg: 'Call metering disabled - Redis not available' });
+    logger.warn({ error: error.message }, 'Call metering disabled - Redis not available');
     return null;
   }
 }
@@ -128,30 +131,103 @@ export const callService = {
       throw new AppError(400, 'Call is not in ringing state');
     }
 
-    // Update call status
+    // Update call status to CONNECTING (not ACTIVE yet)
+    call.status = CallStatus.CONNECTING;
+    await call.save();
+
+    // Notify caller that call was accepted and is connecting
+    emitToUser(call.userId.toString(), 'call_accepted', {
+      callId: String(call._id),
+      status: 'connecting',
+    });
+
+    // Don't start metering yet - wait for both parties to connect
+    // Metering will start when call moves to ACTIVE status
+
+    return call;
+  },
+
+  async confirmCallConnection(callId: string, userId: string) {
+    const call = await Call.findById(callId);
+
+    if (!call) {
+      throw new AppError(404, 'Call not found');
+    }
+
+    if (call.userId.toString() !== userId && call.responderId.toString() !== userId) {
+      throw new AppError(403, 'Not authorized');
+    }
+
+    if (call.status !== CallStatus.CONNECTING) {
+      throw new AppError(400, 'Call is not in connecting state');
+    }
+
+    // Update call status to ACTIVE and start timer
     call.status = CallStatus.ACTIVE;
     call.startTime = new Date();
     await call.save();
 
-    // Notify caller that call was accepted
-    emitToUser(call.userId.toString(), 'call_accepted', {
+    // Notify both parties that call is now active
+    emitToUser(call.userId.toString(), 'call_connected', {
+      callId: String(call._id),
+    });
+    emitToUser(call.responderId.toString(), 'call_connected', {
       callId: String(call._id),
     });
 
-    // Start metering job (if Redis is enabled)
-    const queue = await getCallMeteringQueue();
-    if (queue) {
-      await queue.add(
-        'meter-call',
-        { callId: String(call._id) },
-        {
-          repeat: {
-            every: 30000, // Every 30 seconds
-          },
-          jobId: `meter-${String(call._id)}`,
-        }
-      );
+    // Start metering job (if Redis is enabled) - Don't let this fail the call
+    try {
+      const queue = await getCallMeteringQueue();
+      if (queue) {
+        await queue.add(
+          'meter-call',
+          { callId: String(call._id) },
+          {
+            repeat: {
+              every: 30000, // Every 30 seconds
+            },
+            jobId: `meter-${String(call._id)}`,
+          }
+        );
+        logger.info({ callId: String(call._id) }, 'Call metering started');
+      } else {
+        logger.info({ callId: String(call._id) }, 'Call metering disabled - continuing without metering');
+      }
+    } catch (error) {
+      logger.warn({ error: error.message, callId: String(call._id) }, 'Failed to start call metering - continuing without metering');
+      // Don't throw error - call should continue even if metering fails
     }
+
+    return call;
+  },
+
+  async handleCallConnectionFailure(callId: string, userId: string, reason: string) {
+    const call = await Call.findById(callId);
+
+    if (!call) {
+      throw new AppError(404, 'Call not found');
+    }
+
+    if (call.userId.toString() !== userId && call.responderId.toString() !== userId) {
+      throw new AppError(403, 'Not authorized');
+    }
+
+    // Mark call as ended due to connection failure
+    call.status = CallStatus.ENDED;
+    call.endTime = new Date();
+    await call.save();
+
+    // Notify both parties about connection failure
+    emitToUser(call.userId.toString(), 'call_ended', {
+      callId: String(call._id),
+      reason: 'connection_failed',
+    });
+    emitToUser(call.responderId.toString(), 'call_ended', {
+      callId: String(call._id),
+      reason: 'connection_failed',
+    });
+
+    logger.warn({ callId, userId, reason }, 'Call connection failed');
 
     return call;
   },
@@ -205,10 +281,16 @@ export const callService = {
       throw new AppError(400, 'Call already ended');
     }
 
-    // Stop metering job (if Redis is enabled)
-    const queue = await getCallMeteringQueue();
-    if (queue) {
-      await queue.removeRepeatableByKey(`meter-${String(call._id)}`);
+    // Stop metering job (if Redis is enabled) - Don't let this fail the call ending
+    try {
+      const queue = await getCallMeteringQueue();
+      if (queue) {
+        await queue.removeRepeatableByKey(`meter-${String(call._id)}`);
+        logger.info({ callId: String(call._id) }, 'Call metering stopped');
+      }
+    } catch (error) {
+      logger.warn({ error: error.message, callId: String(call._id) }, 'Failed to stop call metering - call ended anyway');
+      // Don't throw error - call should end even if metering cleanup fails
     }
 
     // Calculate duration
@@ -371,10 +453,22 @@ export const callService = {
   },
 
   generateZegoToken(userId: string, roomId: string): string {
-    // TODO: Implement actual ZEGOCLOUD token generation
-    // This requires ZEGO_APP_ID and ZEGO_SERVER_SECRET
-    // For now, return a placeholder
-    return `token_${userId}_${roomId}`;
+    try {
+      const { generateZegoToken, getZegoConfig } = require('../../lib/zegoToken');
+      const zegoConfig = getZegoConfig();
+      
+      return generateZegoToken({
+        appId: zegoConfig.appId,
+        serverSecret: zegoConfig.serverSecret,
+        userId,
+        roomId,
+        expireTimeInSeconds: 3600 // 1 hour
+      });
+    } catch (error) {
+      logger.error({ error, userId, roomId }, 'Failed to generate ZEGO token');
+      // Return a fallback token for development
+      return `dev_token_${userId}_${roomId}_${Date.now()}`;
+    }
   },
 
   async createCallMessage(call: any) {

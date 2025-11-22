@@ -26,12 +26,17 @@ if (REDIS_ENABLED && bullmqRedis) {
       try {
         const call = await Call.findById(callId);
 
-        if (!call || call.status !== CallStatus.ACTIVE) {
+        if (!call || (call.status !== CallStatus.ACTIVE && call.status !== CallStatus.CONNECTING)) {
           // Call ended or not active, remove repeatable job
           if (callMeteringQueue) {
             await callMeteringQueue.removeRepeatableByKey(job.repeatJobKey!);
           }
           return { status: 'stopped', reason: 'call_not_active' };
+        }
+
+        // Skip metering if call is still connecting
+        if (call.status === CallStatus.CONNECTING) {
+          return { status: 'waiting', reason: 'call_connecting' };
         }
 
         const user = await User.findById(call.userId);
