@@ -24,10 +24,13 @@ export class PaymentService {
         throw new AppError(404, 'Coin plan not found or inactive');
       }
 
-      // Check if user has valid email and phone
-      if (!user.profile?.email || !user.phone) {
-        throw new AppError(400, 'User email and phone are required for payment');
+      // Validate phone is present
+      if (!user.phone) {
+        throw new AppError(400, 'User phone number is required for payment');
       }
+
+      // Use email if available, otherwise generate from phone
+      const customerEmail = user.profile?.email || `${user.phone.replace('+', '')}@bestie.app`;
 
       // Generate unique order ID
       const orderId = `ORDER_${Date.now()}_${uuidv4().slice(0, 8)}`;
@@ -54,7 +57,7 @@ export class PaymentService {
         customerDetails: {
           customerId: userId,
           customerName: user.profile?.name || 'User',
-          customerEmail: user.profile?.email!,
+          customerEmail,
           customerPhone: user.phone,
         },
         orderMeta: {
