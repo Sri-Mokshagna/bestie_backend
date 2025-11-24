@@ -5,6 +5,7 @@ import { coinService } from '../../services/coinService';
 import { PaymentService } from '../../services/paymentService';
 import { AppError } from '../../middleware/errorHandler';
 import { TransactionType } from '../../models/Transaction';
+import { logger } from '../../lib/logger';
 
 const paymentService = new PaymentService();
 
@@ -101,9 +102,13 @@ export const walletController = {
     // Create payment order using PaymentService with Cashfree
     const result = await paymentService.createPaymentOrder(req.user.id, planId);
 
+    // Log the payment session to debug
+    logger.info({ paymentSession: result.paymentSession }, 'Payment session response');
+
     res.json({
       orderId: result.orderId,
-      payment_link: result.paymentSession.payment_link,
+      payment_link: result.paymentSession.payment_link || result.paymentSession.payment_session_id,
+      payment_session_id: result.paymentSession.payment_session_id,
       amount: result.amount,
       coins: result.coins,
       planName: result.planName,
