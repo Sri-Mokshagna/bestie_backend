@@ -105,10 +105,17 @@ export const walletController = {
     // Log the payment session to debug
     logger.info({ paymentSession: result.paymentSession }, 'Payment session response');
 
+    // Construct Cashfree payment URL
+    const paymentSessionId = result.paymentSession.payment_session_id;
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://www.cashfree.com/pg/view'
+      : 'https://sandbox.cashfree.com/pg/view';
+    const paymentLink = `${baseUrl}/${paymentSessionId}`;
+
     res.json({
       orderId: result.orderId,
-      payment_link: result.paymentSession.payment_link || result.paymentSession.payment_session_id,
-      payment_session_id: result.paymentSession.payment_session_id,
+      payment_link: paymentLink,
+      payment_session_id: paymentSessionId,
       amount: result.amount,
       coins: result.coins,
       planName: result.planName,
