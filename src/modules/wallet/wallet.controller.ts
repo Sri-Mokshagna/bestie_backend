@@ -106,11 +106,12 @@ export const walletController = {
     logger.info({ paymentSession: result.paymentSession }, 'Payment session response');
 
     // Construct Cashfree payment URL
+    // For Cashfree API v2023-08-01, use the checkout endpoint with payment_session_id
     const paymentSessionId = result.paymentSession.payment_session_id;
     const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://www.cashfree.com/pg/view'
-      : 'https://sandbox.cashfree.com/pg/view';
-    const paymentLink = `${baseUrl}/${paymentSessionId}`;
+      ? 'https://payments.cashfree.com'
+      : 'https://sandbox.cashfree.com';
+    const paymentLink = `${baseUrl}/pgappsdkapi/v1/checkout?payment_session_id=${paymentSessionId}`;
 
     res.json({
       orderId: result.orderId,
