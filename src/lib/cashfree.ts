@@ -70,7 +70,7 @@ class CashfreeService {
         order_meta: {
           return_url: orderData.orderMeta?.returnUrl || `${process.env.CLIENT_URL}/payment/success`,
           notify_url: orderData.orderMeta?.notifyUrl || `${process.env.SERVER_URL}/api/payments/webhook`,
-          payment_methods: orderData.orderMeta?.paymentMethods || 'cc,dc,upi,nb,wallet',
+          payment_methods: orderData.orderMeta?.paymentMethods || 'cc,dc,upi,nb,app',
         },
       };
 
