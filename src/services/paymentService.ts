@@ -61,7 +61,7 @@ export class PaymentService {
           customerPhone: user.phone,
         },
         orderMeta: {
-          returnUrl: process.env.CLIENT_URL ? `${process.env.CLIENT_URL}payment/success?orderId=${orderId}` : undefined,
+          returnUrl: process.env.CLIENT_URL ? this.buildReturnUrl(process.env.CLIENT_URL, orderId) : undefined,
           notifyUrl: `${process.env.SERVER_URL}/api/payments/webhook`,
           paymentMethods: 'cc,dc,upi,nb,app', // cc=credit card, dc=debit card, upi, nb=net banking, app=mobile wallets
         },
@@ -317,6 +317,31 @@ export class PaymentService {
       logger.error({ error, orderId, adminId }, 'Failed to refund payment');
       throw error;
     }
+  }
+
+  /**
+   * Build return URL handling different CLIENT_URL formats
+   */
+  private buildReturnUrl(clientUrl: string, orderId: string): string {
+    // Handle different CLIENT_URL formats:
+    // 1. "bestie://" -> "bestie://payment/success?orderId=XXX"
+    // 2. "bestie://payment" -> "bestie://payment/success?orderId=XXX" 
+    // 3. "http://localhost:3000" -> "http://localhost:3000/payment/success?orderId=XXX"
+    
+    let baseUrl = clientUrl;
+    
+    // If CLIENT_URL ends with "payment", don't add it again
+    if (baseUrl.endsWith('payment')) {
+      return `${baseUrl}/success?orderId=${orderId}`;
+    }
+    
+    // If CLIENT_URL ends with "/", don't add extra slash
+    if (baseUrl.endsWith('/')) {
+      return `${baseUrl}payment/success?orderId=${orderId}`;
+    }
+    
+    // Default case: add /payment/success
+    return `${baseUrl}/payment/success?orderId=${orderId}`;
   }
 }
 
