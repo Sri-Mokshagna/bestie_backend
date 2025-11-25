@@ -61,7 +61,7 @@ export class PaymentService {
           customerPhone: user.phone,
         },
         orderMeta: {
-          returnUrl: process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/payment/success?orderId=${orderId}` : undefined,
+          returnUrl: process.env.CLIENT_URL ? `${process.env.CLIENT_URL}payment/success?orderId=${orderId}` : undefined,
           notifyUrl: `${process.env.SERVER_URL}/api/payments/webhook`,
           paymentMethods: 'cc,dc,upi,nb,app', // cc=credit card, dc=debit card, upi, nb=net banking, app=mobile wallets
         },
