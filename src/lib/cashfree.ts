@@ -17,8 +17,8 @@ class CashfreeService {
       this.config = {
         appId: process.env.CASHFREE_APP_ID!,
         secretKey: process.env.CASHFREE_SECRET_KEY!,
-        baseUrl: process.env.NODE_ENV === 'production' 
-          ? 'https://api.cashfree.com/pg' 
+        baseUrl: process.env.NODE_ENV === 'production'
+          ? 'https://api.cashfree.com/pg'
           : 'https://sandbox.cashfree.com/pg',
         webhookSecret: process.env.CASHFREE_WEBHOOK_SECRET!,
       };
@@ -68,7 +68,7 @@ class CashfreeService {
           customer_phone: orderData.customerDetails.customerPhone,
         },
         order_meta: {
-          return_url: orderData.orderMeta?.returnUrl || `${process.env.CLIENT_URL}/payment/success`,
+          return_url: orderData.orderMeta?.returnUrl || `${process.env.SERVER_URL}/payment/success`,
           notify_url: orderData.orderMeta?.notifyUrl || `${process.env.SERVER_URL}/api/payments/webhook`,
           payment_methods: orderData.orderMeta?.paymentMethods || 'cc,dc,upi,nb,app',
         },
