@@ -68,9 +68,8 @@ class CashfreeService {
           customer_phone: orderData.customerDetails.customerPhone,
         },
         order_meta: {
-          return_url: orderData.orderMeta?.returnUrl || `${process.env.SERVER_URL}/payment/success`,
-          notify_url: orderData.orderMeta?.notifyUrl || `${process.env.SERVER_URL}/api/payments/webhook`,
-          payment_methods: orderData.orderMeta?.paymentMethods || 'cc,dc,upi,nb,app',
+          return_url: orderData.orderMeta?.returnUrl,
+          notify_url: orderData.orderMeta?.notifyUrl,
         },
       };
 
@@ -83,8 +82,11 @@ class CashfreeService {
 
       logger.info({ orderId: orderData.orderId }, 'Payment session created');
       return response.data;
-    } catch (error) {
-      logger.error({ error, orderId: orderData.orderId }, 'Failed to create payment session');
+    } catch (error: any) {
+      logger.error({
+        error: error.response?.data || error.message,
+        orderId: orderData.orderId
+      }, 'Failed to create payment session');
       throw error;
     }
   }

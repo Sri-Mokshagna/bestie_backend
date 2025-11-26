@@ -12,34 +12,27 @@ import { AppError } from '../middleware/errorHandler';
 export class PaymentService {
   async createPaymentOrder(userId: string, planId: string) {
     try {
-      // Validate user
       const user = await User.findById(userId);
       if (!user) {
         throw new AppError(404, 'User not found');
       }
 
-      // Validate plan
       const plan = await CoinPlan.findById(planId);
       if (!plan || !plan.isActive) {
         throw new AppError(404, 'Coin plan not found or inactive');
       }
 
-      // Validate phone is present
       if (!user.phone) {
         throw new AppError(400, 'User phone number is required for payment');
       }
 
-      // Use email if available, otherwise generate from phone
       const customerEmail = user.profile?.email || `${user.phone.replace('+', '')}@bestie.app`;
-
-      // Generate unique order ID
       const orderId = `ORDER_${Date.now()}_${uuidv4().slice(0, 8)}`;
 
-      // Create payment record
       const payment = new Payment({
         userId: new Types.ObjectId(userId),
         orderId,
-        cashfreeOrderId: orderId, // Will be updated with Cashfree's order ID
+        cashfreeOrderId: orderId,
         planId: new Types.ObjectId(planId),
         amount: plan.priceINR,
         coins: plan.coins,
@@ -49,7 +42,8 @@ export class PaymentService {
 
       await payment.save();
 
-      // Create Cashfree payment session
+      const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
+
       const paymentSession = await cashfreeService.createPaymentSession({
         orderId,
         amount: plan.priceINR,
@@ -61,13 +55,11 @@ export class PaymentService {
           customerPhone: user.phone,
         },
         orderMeta: {
-          returnUrl: `${process.env.SERVER_URL}/payment/success?orderId=${orderId}`,
-          notifyUrl: `${process.env.SERVER_URL}/api/payments/webhook`,
-          paymentMethods: 'cc,dc,upi,nb,app', // cc=credit card, dc=debit card, upi, nb=net banking, app=mobile wallets
+          returnUrl: `${serverUrl}/payment/success?orderId=${orderId}`,
+          notifyUrl: `${serverUrl}/api/payments/webhook`,
         },
       });
 
-      // Update payment with Cashfree order ID
       payment.cashfreeOrderId = paymentSession.order_id;
       payment.gatewayResponse = paymentSession;
       await payment.save();
@@ -89,7 +81,6 @@ export class PaymentService {
 
   async handlePaymentWebhook(webhookData: any, signature: string, rawBody: string) {
     try {
-      // Verify webhook signature
       const isValidSignature = cashfreeService.verifyWebhookSignature(rawBody, signature);
       if (!isValidSignature) {
         throw new AppError(400, 'Invalid webhook signature');
@@ -97,14 +88,12 @@ export class PaymentService {
 
       const { order_id, payment_status, payment_method, cf_payment_id } = webhookData;
 
-      // Find payment record
       const payment = await Payment.findOne({ orderId: order_id });
       if (!payment) {
         logger.warn({ orderId: order_id }, 'Payment record not found for webhook');
         return;
       }
 
-      // Update payment record
       payment.webhookData = webhookData;
       payment.cashfreePaymentId = cf_payment_id;
       payment.paymentMethod = this.mapPaymentMethod(payment_method) as any;
@@ -133,7 +122,6 @@ export class PaymentService {
 
   private async handleSuccessfulPayment(payment: IPayment) {
     try {
-      // Prevent duplicate processing
       if (payment.status === PaymentStatus.SUCCESS) {
         logger.warn({ orderId: payment.orderId }, 'Payment already processed as successful');
         return;
@@ -141,7 +129,6 @@ export class PaymentService {
 
       payment.status = PaymentStatus.SUCCESS;
 
-      // Add coins to user account
       await coinService.creditCoins(
         payment.userId.toString(),
         payment.coins,
@@ -211,7 +198,6 @@ export class PaymentService {
         throw new AppError(404, 'Payment not found');
       }
 
-      // If payment is still pending, check with Cashfree
       if (payment.status === PaymentStatus.PENDING) {
         try {
           const cashfreeStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
@@ -280,14 +266,12 @@ export class PaymentService {
 
       const refundId = `REFUND_${Date.now()}_${uuidv4().slice(0, 8)}`;
 
-      // Initiate refund with Cashfree
       const refundResponse = await cashfreeService.refundPayment(
         payment.cashfreeOrderId,
         payment.amount,
         refundId
       );
 
-      // Deduct coins from user account
       await coinService.creditCoins(
         payment.userId.toString(),
         -payment.coins,
@@ -295,7 +279,6 @@ export class PaymentService {
         { orderId: payment.orderId, description: `Refund - Order ${payment.orderId}` }
       );
 
-      // Update payment record
       payment.status = PaymentStatus.REFUNDED;
       payment.refundId = refundId;
       payment.refundAmount = payment.amount;
@@ -317,31 +300,6 @@ export class PaymentService {
       logger.error({ error, orderId, adminId }, 'Failed to refund payment');
       throw error;
     }
-  }
-
-  /**
-   * Build return URL handling different CLIENT_URL formats
-   */
-  private buildReturnUrl(clientUrl: string, orderId: string): string {
-    // Handle different CLIENT_URL formats:
-    // 1. "bestie://" -> "bestie://payment/success?orderId=XXX"
-    // 2. "bestie://payment" -> "bestie://payment/success?orderId=XXX" 
-    // 3. "http://localhost:3000" -> "http://localhost:3000/payment/success?orderId=XXX"
-
-    let baseUrl = clientUrl;
-
-    // If CLIENT_URL ends with "payment", don't add it again
-    if (baseUrl.endsWith('payment')) {
-      return `${baseUrl}/success?orderId=${orderId}`;
-    }
-
-    // If CLIENT_URL ends with "/", don't add extra slash
-    if (baseUrl.endsWith('/')) {
-      return `${baseUrl}payment/success?orderId=${orderId}`;
-    }
-
-    // Default case: add /payment/success
-    return `${baseUrl}/payment/success?orderId=${orderId}`;
   }
 }
 

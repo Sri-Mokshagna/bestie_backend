@@ -85,9 +85,6 @@ export const walletController = {
     res.json(result);
   },
 
-  /**
-   * Create payment order for coin purchase using Cashfree
-   */
   async createPaymentOrder(req: AuthRequest, res: Response) {
     if (!req.user) {
       throw new AppError(401, 'Not authenticated');
@@ -99,19 +96,18 @@ export const walletController = {
       throw new AppError(400, 'Plan ID is required');
     }
 
-    // Create payment order using PaymentService with Cashfree
     const result = await paymentService.createPaymentOrder(req.user.id, planId);
 
-    // Log the payment session to debug
     logger.info({ paymentSession: result.paymentSession }, 'Payment session response');
 
-    // Construct Cashfree payment URL
-    // For Cashfree API v2023-08-01, use the checkout endpoint with payment_session_id
     const paymentSessionId = result.paymentSession.payment_session_id;
-    const baseUrl = process.env.NODE_ENV === 'production' 
+
+    // Use the correct Cashfree payment URL format
+    const baseUrl = process.env.NODE_ENV === 'production'
       ? 'https://payments.cashfree.com'
-      : 'https://sandbox.cashfree.com';
-    const paymentLink = `${baseUrl}/pgappsdkapi/v1/checkout?payment_session_id=${paymentSessionId}`;
+      : 'https://payments.cashfree.com';
+
+    const paymentLink = `${baseUrl}/pay/${result.orderId}/${paymentSessionId}`;
 
     res.json({
       orderId: result.orderId,
@@ -123,9 +119,6 @@ export const walletController = {
     });
   },
 
-  /**
-   * Get payment status (Cashfree handles verification via webhook)
-   */
   async verifyPaymentAndCredit(req: AuthRequest, res: Response) {
     if (!req.user) {
       throw new AppError(401, 'Not authenticated');
@@ -137,7 +130,6 @@ export const walletController = {
       throw new AppError(400, 'Order ID is required');
     }
 
-    // Get payment status from PaymentService
     const payment = await paymentService.getPaymentStatus(orderId, req.user.id);
 
     res.json({
