@@ -87,6 +87,12 @@ export class PaymentService {
 
       const { order_id, payment_status, payment_method, cf_payment_id } = webhookData;
 
+      logger.info({
+        webhookOrderId: order_id,
+        paymentStatus: payment_status,
+        fullWebhookData: webhookData
+      }, 'Processing webhook - searching for payment');
+
       // Cashfree sends their own order_id in webhook, so we need to find payment by cashfreeOrderId
       const payment = await Payment.findOne({
         $or: [
@@ -96,9 +102,22 @@ export class PaymentService {
       });
 
       if (!payment) {
-        logger.warn({ cashfreeOrderId: order_id }, 'Payment record not found for webhook');
+        // Log all payments to help debug
+        const allPayments = await Payment.find({}).limit(5).select('orderId cashfreeOrderId').lean();
+        logger.error({
+          searchedFor: order_id,
+          recentPayments: allPayments,
+          webhookData
+        }, 'Payment record not found for webhook - showing recent payments');
         return;
       }
+
+      logger.info({
+        foundPayment: {
+          orderId: payment.orderId,
+          cashfreeOrderId: payment.cashfreeOrderId
+        }
+      }, 'Payment record found');
 
       payment.webhookData = webhookData;
       payment.cashfreePaymentId = cf_payment_id;
