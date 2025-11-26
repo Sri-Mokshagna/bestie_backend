@@ -85,27 +85,58 @@ export class PaymentService {
         throw new AppError(400, 'Invalid webhook signature');
       }
 
-      const { order_id, payment_status, payment_method, cf_payment_id } = webhookData;
+      // Parse webhook based on type
+      const webhookType = webhookData.type;
+      let order_id: string;
+      let payment_status: string;
+      let payment_method: any;
+      let cf_payment_id: string;
+      let ourOrderId: string | null = null;
+
+      if (webhookType === 'PAYMENT_SUCCESS_WEBHOOK' || webhookType === 'PAYMENT_FAILED_WEBHOOK') {
+        order_id = webhookData.data?.order?.order_id;
+        payment_status = webhookData.data?.payment?.payment_status;
+        payment_method = webhookData.data?.payment?.payment_method;
+        cf_payment_id = webhookData.data?.payment?.cf_payment_id;
+        if (webhookData.data?.order?.order_tags?.link_id) {
+          ourOrderId = webhookData.data.order.order_tags.link_id.replace(/^LINK_/, '');
+        }
+      } else if (webhookType === 'PAYMENT_LINK_EVENT') {
+        order_id = webhookData.data?.order?.order_id;
+        payment_status = webhookData.data?.order?.transaction_status === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
+        payment_method = null;
+        cf_payment_id = webhookData.data?.order?.transaction_id;
+        if (webhookData.data?.link_id) {
+          ourOrderId = webhookData.data.link_id.replace(/^LINK_/, '');
+        }
+      } else {
+        logger.warn({ webhookType }, 'Unknown webhook type');
+        return;
+      }
 
       logger.info({
-        webhookOrderId: order_id,
-        paymentStatus: payment_status,
-        fullWebhookData: webhookData
-      }, 'Processing webhook - searching for payment');
+        webhookType,
+        cashfreeOrderId: order_id,
+        ourOrderId,
+        payment_status
+      }, 'Parsed webhook - searching for payment');
 
-      // Cashfree sends their own order_id in webhook, so we need to find payment by cashfreeOrderId
-      const payment = await Payment.findOne({
-        $or: [
-          { cashfreeOrderId: order_id },
-          { orderId: order_id }
-        ]
-      });
+      // Search using multiple identifiers
+      const searchCriteria: any[] = [
+        { cashfreeOrderId: order_id },
+        { orderId: order_id }
+      ];
+      if (ourOrderId) {
+        searchCriteria.push({ orderId: ourOrderId });
+      }
+
+      const payment = await Payment.findOne({ $or: searchCriteria });
 
       if (!payment) {
-        // Log all payments to help debug
         const allPayments = await Payment.find({}).limit(5).select('orderId cashfreeOrderId').lean();
         logger.error({
-          searchedFor: order_id,
+          searchedCashfreeOrderId: order_id,
+          searchedOurOrderId: ourOrderId,
           recentPayments: allPayments,
           webhookData
         }, 'Payment record not found for webhook - showing recent payments');
@@ -117,11 +148,13 @@ export class PaymentService {
           orderId: payment.orderId,
           cashfreeOrderId: payment.cashfreeOrderId
         }
-      }, 'Payment record found');
+      }, 'Payment record found!');
 
       payment.webhookData = webhookData;
-      payment.cashfreePaymentId = cf_payment_id;
-      payment.paymentMethod = this.mapPaymentMethod(payment_method) as any;
+      payment.cashfreePaymentId = cf_payment_id?.toString();
+      if (payment_method) {
+        payment.paymentMethod = this.mapPaymentMethod(payment_method) as any;
+      }
 
       switch (payment_status) {
         case 'SUCCESS':
@@ -138,7 +171,7 @@ export class PaymentService {
       }
 
       await payment.save();
-      logger.info({ orderId: order_id, status: payment_status }, 'Payment webhook processed');
+      logger.info({ orderId: payment.orderId, status: payment_status }, 'Payment webhook processed successfully!');
     } catch (error) {
       logger.error({ error, webhookData }, 'Failed to process payment webhook');
       throw error;
