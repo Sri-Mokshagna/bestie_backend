@@ -1,7 +1,8 @@
 import Redis from 'ioredis';
 import { logger } from './logger';
 
-const REDIS_ENABLED = process.env.REDIS_ENABLED !== 'false';
+// Temporarily disabled Redis for testing call sync
+const REDIS_ENABLED = false; // process.env.REDIS_ENABLED !== 'false';
 const REDIS_URL = process.env.REDIS_URL;
 
 let redis: Redis | null = null;
@@ -56,7 +57,7 @@ if (REDIS_ENABLED) {
       // Development: Use individual host/port
       const redisHost = process.env.REDIS_HOST || 'localhost';
       const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
-      
+
       // Regular Redis connection with timeouts
       redis = new Redis({
         host: redisHost,
@@ -111,7 +112,7 @@ if (redis) {
 
   redis.on('error', (err) => {
     logger.error({ err: err.message }, '❌ Redis connection error');
-    
+
     // If we get repeated timeout errors, disable Redis to prevent infinite loops
     if (err.message.includes('Command timed out')) {
       logger.error('Redis command timeouts detected. Consider disabling Redis or checking connection.');
