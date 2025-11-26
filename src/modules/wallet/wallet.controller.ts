@@ -1,10 +1,8 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middleware/auth';
 import { walletService } from './wallet.service';
-import { coinService } from '../../services/coinService';
 import { PaymentService } from '../../services/paymentService';
 import { AppError } from '../../middleware/errorHandler';
-import { TransactionType } from '../../models/Transaction';
 import { logger } from '../../lib/logger';
 
 const paymentService = new PaymentService();
@@ -16,7 +14,6 @@ export const walletController = {
     }
 
     const balance = await walletService.getBalance(req.user.id);
-
     res.json({ balance });
   },
 
@@ -29,13 +26,11 @@ export const walletController = {
     const limit = parseInt(req.query.limit as string) || 20;
 
     const result = await walletService.getTransactions(req.user.id, page, limit);
-
     res.json(result);
   },
 
   async getCoinPlans(req: AuthRequest, res: Response) {
     const plans = await walletService.getCoinPlans();
-
     res.json({ plans });
   },
 
@@ -98,22 +93,15 @@ export const walletController = {
 
     const result = await paymentService.createPaymentOrder(req.user.id, planId);
 
-    logger.info({ paymentSession: result.paymentSession }, 'Payment session response');
-
-    const paymentSessionId = result.paymentSession.payment_session_id;
-
-    // Cashfree checkout URL - Use order_id based URL for hosted checkout
-    const baseUrl = process.env.NODE_ENV === 'production'
-      ? 'https://payments.cashfree.com'
-      : 'https://sandbox.cashfree.com';
-
-    // Correct Cashfree hosted checkout URL format
-    const paymentLink = `${baseUrl}/v3/order/pay/${result.orderId}`;
+    logger.info({
+      orderId: result.orderId,
+      paymentLink: result.paymentLink
+    }, 'Payment link generated');
 
     res.json({
       orderId: result.orderId,
-      payment_link: paymentLink,
-      payment_session_id: paymentSessionId,
+      payment_link: result.paymentLink,
+      link_id: result.linkId,
       amount: result.amount,
       coins: result.coins,
       planName: result.planName,

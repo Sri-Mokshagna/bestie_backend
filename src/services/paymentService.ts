@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { cashfreeService } from '../lib/cashfree';
 import { Payment, PaymentStatus, IPayment } from '../models/Payment';
-import { CoinPlan, ICoinPlan } from '../models/CoinPlan';
+import { CoinPlan } from '../models/CoinPlan';
 import { User } from '../models/User';
 import { coinService } from './coinService';
 import { TransactionType } from '../models/Transaction';
@@ -44,7 +44,7 @@ export class PaymentService {
 
       const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
 
-      const paymentSession = await cashfreeService.createPaymentSession({
+      const result = await cashfreeService.createOrderAndGetLink({
         orderId,
         amount: plan.priceINR,
         currency: 'INR',
@@ -54,21 +54,20 @@ export class PaymentService {
           customerEmail,
           customerPhone: user.phone,
         },
-        orderMeta: {
-          returnUrl: `${serverUrl}/payment/success?orderId=${orderId}`,
-          notifyUrl: `${serverUrl}/api/payments/webhook`,
-        },
+        returnUrl: `${serverUrl}/payment/success?orderId=${orderId}`,
+        notifyUrl: `${serverUrl}/api/payments/webhook`,
       });
 
-      payment.cashfreeOrderId = paymentSession.order_id;
-      payment.gatewayResponse = paymentSession;
+      payment.cashfreeOrderId = result.order.order_id;
+      payment.gatewayResponse = result.order;
       await payment.save();
 
-      logger.info({ userId, orderId, planId }, 'Payment order created');
+      logger.info({ userId, orderId, planId, paymentLink: result.payment_link }, 'Payment order and link created');
 
       return {
         orderId,
-        paymentSession,
+        paymentLink: result.payment_link,
+        linkId: result.link_id,
         amount: plan.priceINR,
         coins: plan.coins,
         planName: plan.name,
