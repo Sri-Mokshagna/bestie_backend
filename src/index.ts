@@ -31,6 +31,7 @@ import healthRoutes from './routes/health';
 import paymentRoutes from './modules/payments/payment.routes';
 import redemptionRoutes from './modules/redemption/redemption.routes';
 import commissionRoutes from './modules/admin/commission.routes';
+import paymentRedirectRoutes from './routes/payment-redirect';
 
 // Initialize jobs (only if Redis is available)
 import './jobs/callMetering';
@@ -102,6 +103,7 @@ app.use('/api/admob', admobRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/redemptions', redemptionRoutes);
 app.use('/api/admin/commission', commissionRoutes);
+app.use('/payment', paymentRedirectRoutes);
 app.use('/api', healthRoutes);
 
 // Initialize Socket.IO
@@ -126,10 +128,10 @@ async function start() {
     httpServer.listen(port, '0.0.0.0', () => {
       const isProduction = process.env.NODE_ENV === 'production';
       const renderUrl = process.env.RENDER_EXTERNAL_URL;
-      
+
       logger.info(`🚀 Server running on port ${port}`);
       logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-      
+
       if (isProduction && renderUrl) {
         logger.info(`🔗 Health check: ${renderUrl}/healthz`);
         logger.info(`🌐 External URL: ${renderUrl}`);

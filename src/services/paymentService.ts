@@ -61,7 +61,7 @@ export class PaymentService {
           customerPhone: user.phone,
         },
         orderMeta: {
-          returnUrl: process.env.CLIENT_URL ? this.buildReturnUrl(process.env.CLIENT_URL, orderId) : undefined,
+          returnUrl: `${process.env.SERVER_URL}/payment/success?orderId=${orderId}`,
           notifyUrl: `${process.env.SERVER_URL}/api/payments/webhook`,
           paymentMethods: 'cc,dc,upi,nb,app', // cc=credit card, dc=debit card, upi, nb=net banking, app=mobile wallets
         },
@@ -150,10 +150,10 @@ export class PaymentService {
       );
 
       logger.info(
-        { 
-          userId: payment.userId, 
-          orderId: payment.orderId, 
-          coins: payment.coins 
+        {
+          userId: payment.userId,
+          orderId: payment.orderId,
+          coins: payment.coins
         },
         'Coins added for successful payment'
       );
@@ -168,12 +168,12 @@ export class PaymentService {
   private async handleFailedPayment(payment: IPayment, webhookData: any) {
     payment.status = PaymentStatus.FAILED;
     payment.failureReason = webhookData.failure_reason || 'Payment failed';
-    
+
     logger.info(
-      { 
-        userId: payment.userId, 
-        orderId: payment.orderId, 
-        reason: payment.failureReason 
+      {
+        userId: payment.userId,
+        orderId: payment.orderId,
+        reason: payment.failureReason
       },
       'Payment failed'
     );
@@ -181,11 +181,11 @@ export class PaymentService {
 
   private async handleCancelledPayment(payment: IPayment) {
     payment.status = PaymentStatus.CANCELLED;
-    
+
     logger.info(
-      { 
-        userId: payment.userId, 
-        orderId: payment.orderId 
+      {
+        userId: payment.userId,
+        orderId: payment.orderId
       },
       'Payment cancelled'
     );
@@ -215,7 +215,7 @@ export class PaymentService {
       if (payment.status === PaymentStatus.PENDING) {
         try {
           const cashfreeStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
-          
+
           if (cashfreeStatus.order_status === 'PAID') {
             await this.handleSuccessfulPayment(payment);
             await payment.save();
@@ -239,7 +239,7 @@ export class PaymentService {
   async getUserPaymentHistory(userId: string, page = 1, limit = 10) {
     try {
       const skip = (page - 1) * limit;
-      
+
       const payments = await Payment.find({ userId })
         .populate('planId', 'name coins priceINR')
         .sort({ createdAt: -1 })
@@ -303,11 +303,11 @@ export class PaymentService {
       await payment.save();
 
       logger.info(
-        { 
-          orderId, 
-          refundId, 
-          adminId, 
-          reason 
+        {
+          orderId,
+          refundId,
+          adminId,
+          reason
         },
         'Payment refunded successfully'
       );
@@ -327,19 +327,19 @@ export class PaymentService {
     // 1. "bestie://" -> "bestie://payment/success?orderId=XXX"
     // 2. "bestie://payment" -> "bestie://payment/success?orderId=XXX" 
     // 3. "http://localhost:3000" -> "http://localhost:3000/payment/success?orderId=XXX"
-    
+
     let baseUrl = clientUrl;
-    
+
     // If CLIENT_URL ends with "payment", don't add it again
     if (baseUrl.endsWith('payment')) {
       return `${baseUrl}/success?orderId=${orderId}`;
     }
-    
+
     // If CLIENT_URL ends with "/", don't add extra slash
     if (baseUrl.endsWith('/')) {
       return `${baseUrl}payment/success?orderId=${orderId}`;
     }
-    
+
     // Default case: add /payment/success
     return `${baseUrl}/payment/success?orderId=${orderId}`;
   }
