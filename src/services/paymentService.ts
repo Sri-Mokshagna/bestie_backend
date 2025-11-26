@@ -180,8 +180,9 @@ export class PaymentService {
 
   private async handleSuccessfulPayment(payment: IPayment) {
     try {
+      // Idempotency check - prevent processing the same payment twice
       if (payment.status === PaymentStatus.SUCCESS) {
-        logger.warn({ orderId: payment.orderId }, 'Payment already processed as successful');
+        logger.warn({ orderId: payment.orderId, currentStatus: payment.status }, 'Payment already processed as successful - skipping to prevent duplicate coins');
         return;
       }
 
