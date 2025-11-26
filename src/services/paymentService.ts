@@ -87,9 +87,16 @@ export class PaymentService {
 
       const { order_id, payment_status, payment_method, cf_payment_id } = webhookData;
 
-      const payment = await Payment.findOne({ orderId: order_id });
+      // Cashfree sends their own order_id in webhook, so we need to find payment by cashfreeOrderId
+      const payment = await Payment.findOne({
+        $or: [
+          { cashfreeOrderId: order_id },
+          { orderId: order_id }
+        ]
+      });
+
       if (!payment) {
-        logger.warn({ orderId: order_id }, 'Payment record not found for webhook');
+        logger.warn({ cashfreeOrderId: order_id }, 'Payment record not found for webhook');
         return;
       }
 
