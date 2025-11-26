@@ -102,13 +102,13 @@ export const walletController = {
 
     const paymentSessionId = result.paymentSession.payment_session_id;
 
-    // Use correct Cashfree domain based on environment
+    // Cashfree checkout URL - Use order_id based URL for hosted checkout
     const baseUrl = process.env.NODE_ENV === 'production'
       ? 'https://payments.cashfree.com'
       : 'https://sandbox.cashfree.com';
 
-    // Cashfree hosted checkout page URL
-    const paymentLink = `${baseUrl}/pay?order_token=${paymentSessionId}`;
+    // Correct Cashfree hosted checkout URL format
+    const paymentLink = `${baseUrl}/v3/order/pay/${result.orderId}`;
 
     res.json({
       orderId: result.orderId,
