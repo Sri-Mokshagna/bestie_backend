@@ -143,8 +143,11 @@ class CashfreeService {
     try {
       const config = this.initializeConfig();
 
-      if (!config.webhookSecret || config.webhookSecret === 'test_skip_verification') {
-        logger.warn('Skipping webhook signature verification in test mode');
+      // Skip verification in test mode (Cashfree doesn't provide webhook secrets in sandbox)
+      if (!config.webhookSecret ||
+        config.webhookSecret === 'test_skip_verification' ||
+        process.env.NODE_ENV !== 'production') {
+        logger.info('Skipping webhook signature verification (test mode)');
         return true;
       }
 

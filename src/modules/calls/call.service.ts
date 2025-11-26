@@ -47,7 +47,7 @@ export const callService = {
 
     // Find responder user (responderId is the User._id with role 'responder')
     const responderUser = await User.findById(responderId);
-    
+
     if (!responderUser) {
       throw new AppError(404, 'Responder not found');
     }
@@ -71,7 +71,7 @@ export const callService = {
       // Auto-mark old ringing calls as missed (older than 60 seconds)
       const now = new Date();
       const callAge = now.getTime() - activeCall.createdAt.getTime();
-      
+
       if (activeCall.status === CallStatus.RINGING && callAge > 60000) {
         // Mark as missed and allow new call
         activeCall.status = CallStatus.MISSED;
@@ -175,30 +175,44 @@ export const callService = {
       callId: String(call._id),
     });
 
-    // Start metering job (if Redis is enabled) - Don't let this fail the call
+    // Start metering job (if Redis is enabled) - Fire and forget, don't block call flow
+    this.startCallMetering(String(call._id)).catch(err => {
+      logger.warn({ error: err.message, callId: String(call._id) }, 'Failed to start call metering in background');
+    });
+
+    return call;
+  },
+
+  // Helper method to start metering asynchronously
+  async startCallMetering(callId: string) {
     try {
-      const queue = await getCallMeteringQueue();
+      // Add a timeout to getting the queue to prevent hanging
+      const queuePromise = getCallMeteringQueue();
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+
+      const queue = await Promise.race([queuePromise, timeoutPromise]);
+
       if (queue) {
         await queue.add(
           'meter-call',
-          { callId: String(call._id) },
+          { callId },
           {
             repeat: {
               every: 30000, // Every 30 seconds
             },
-            jobId: `meter-${String(call._id)}`,
+            jobId: `meter-${callId}`,
+            removeOnComplete: true,
+            removeOnFail: true,
           }
         );
-        logger.info({ callId: String(call._id) }, 'Call metering started');
+        logger.info({ callId }, 'Call metering started');
       } else {
-        logger.info({ callId: String(call._id) }, 'Call metering disabled - continuing without metering');
+        logger.info({ callId }, 'Call metering disabled or timed out - continuing without metering');
       }
     } catch (error) {
-      logger.warn({ error: error.message, callId: String(call._id) }, 'Failed to start call metering - continuing without metering');
+      logger.warn({ error: error.message, callId }, 'Failed to start call metering - continuing without metering');
       // Don't throw error - call should continue even if metering fails
     }
-
-    return call;
   },
 
   async handleCallConnectionFailure(callId: string, userId: string, reason: string) {
@@ -398,7 +412,7 @@ export const callService = {
     }
 
     call.durationSeconds = durationSeconds;
-    
+
     // If call is still active, mark as ended
     if (call.status === CallStatus.ACTIVE) {
       call.status = CallStatus.ENDED;
@@ -456,7 +470,7 @@ export const callService = {
     try {
       const { generateZegoToken, getZegoConfig } = require('../../lib/zegoToken');
       const zegoConfig = getZegoConfig();
-      
+
       return generateZegoToken({
         appId: zegoConfig.appId,
         serverSecret: zegoConfig.serverSecret,
