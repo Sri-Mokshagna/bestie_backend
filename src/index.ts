@@ -33,9 +33,6 @@ import redemptionRoutes from './modules/redemption/redemption.routes';
 import commissionRoutes from './modules/admin/commission.routes';
 import paymentRedirectRoutes from './routes/payment-redirect';
 
-// Initialize jobs (only if Redis is available)
-import './jobs/callMetering';
-
 const app = express();
 const httpServer = createServer(app);
 

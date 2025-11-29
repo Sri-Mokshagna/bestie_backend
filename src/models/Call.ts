@@ -14,11 +14,6 @@ export enum CallStatus {
   MISSED = 'missed',
 }
 
-export interface ILiveMeter {
-  lastTick: Date;
-  remainingBalance: number;
-}
-
 export interface ICall extends Document {
   userId: Types.ObjectId;
   responderId: Types.ObjectId;
@@ -29,7 +24,9 @@ export interface ICall extends Document {
   endTime?: Date;
   durationSeconds?: number;
   coinsCharged?: number;
-  liveMeter?: ILiveMeter;
+  maxDurationSeconds?: number;  // Precalculated max duration from available coins
+  scheduledEndTime?: Date;      // When call should auto-end
+  initialCoinBalance?: number;  // User's balance when call started
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,10 +65,9 @@ const callSchema = new Schema<ICall>(
       type: Number,
       default: 0,
     },
-    liveMeter: {
-      lastTick: Date,
-      remainingBalance: Number,
-    },
+    maxDurationSeconds: Number,
+    scheduledEndTime: Date,
+    initialCoinBalance: Number,
   },
   {
     timestamps: true,

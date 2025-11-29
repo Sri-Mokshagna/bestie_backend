@@ -2,28 +2,16 @@ import crypto from 'crypto';
 import { Call, CallType, CallStatus } from '../../models/Call';
 import { User } from '../../models/User';
 import { Chat, Message, MessageType } from '../../models/Chat';
+import { Transaction, TransactionType, TransactionStatus } from '../../models/Transaction';
+import { Responder } from '../../models/Responder';
+import { CommissionConfig } from '../../models/CommissionConfig';
 import { AppError } from '../../middleware/errorHandler';
 import { logger } from '../../lib/logger';
 import { emitToUser } from '../../lib/socket';
 import { coinService } from '../../services/coinService';
-import redis from '../../lib/redis';
 
-// Check if Redis is actually enabled (from redis.ts config, not env var)
-const REDIS_ENABLED = redis !== null;
-
-async function getCallMeteringQueue() {
-  if (!REDIS_ENABLED) {
-    // Redis is disabled, return null immediately without dynamic import
-    return null;
-  }
-  try {
-    const mod = await import('../../jobs/callMetering');
-    return mod.callMeteringQueue as any;
-  } catch (error: any) {
-    logger.warn({ error: error.message }, 'Call metering disabled - Redis not available');
-    return null;
-  }
-}
+// Store active call timers to cancel if call ends early
+const callTimers = new Map<string, NodeJS.Timeout>();
 
 export const callService = {
   async initiateCall(userId: string, responderId: string, type: CallType) {
@@ -163,54 +151,185 @@ export const callService = {
       throw new AppError(400, 'Call is not in connecting state');
     }
 
-    // Update call status to ACTIVE and start timer
+    // Get user's current coin balance
+    const user = await User.findById(call.userId);
+    if (!user) {
+      throw new AppError(404, 'User not found');
+    }
+
+    // Calculate max duration from available coins
+    const callType = call.type === CallType.AUDIO ? 'audio' : 'video';
+    const rate = await coinService.getCallRate(callType);
+
+    // Calculate max seconds (rate is coins per minute, convert to seconds)
+    const maxDurationSeconds = Math.floor((user.coinBalance / rate) * 60);
+
+    if (maxDurationSeconds < 1) {
+      throw new AppError(400, 'Insufficient coins to start call');
+    }
+
+    // Update call status to ACTIVE and set calculated times
     call.status = CallStatus.ACTIVE;
     call.startTime = new Date();
+    call.scheduledEndTime = new Date(call.startTime.getTime() + (maxDurationSeconds * 1000));
+    call.maxDurationSeconds = maxDurationSeconds;
+    call.initialCoinBalance = user.coinBalance;
     await call.save();
 
-    // Notify both parties that call is now active
+    // Notify both parties that call is now active with max duration
     emitToUser(call.userId.toString(), 'call_connected', {
       callId: String(call._id),
+      maxDuration: maxDurationSeconds,
     });
     emitToUser(call.responderId.toString(), 'call_connected', {
       callId: String(call._id),
+      maxDuration: maxDurationSeconds,
     });
 
-    // Start metering job (if Redis is enabled) - Fire and forget, don't block call flow
-    this.startCallMetering(String(call._id)).catch(err => {
-      logger.warn({ error: err.message, callId: String(call._id) }, 'Failed to start call metering in background');
-    });
+    // Schedule automatic call termination
+    this.scheduleCallTermination(call);
+
+    logger.info({
+      callId: String(call._id),
+      maxDurationSeconds,
+      scheduledEndTime: call.scheduledEndTime,
+      userCoins: user.coinBalance,
+    }, 'Call activated with time limit');
 
     return call;
   },
 
-  // Helper method to start metering completely asynchronously
-  async startCallMetering(callId: string) {
-    try {
-      // Try to get queue but don't wait if Redis is slow/disabled
-      const queue = await getCallMeteringQueue();
+  // Schedule automatic call termination when time limit is reached
+  scheduleCallTermination(call: any) {
+    const callId = String(call._id);
+    const durationMs = call.maxDurationSeconds! * 1000;
 
-      if (queue) {
-        await queue.add(
-          'meter-call',
-          { callId },
-          {
-            repeat: {
-              every: 30000, // Every 30 seconds
-            },
-            jobId: `meter-${callId}`,
-            removeOnComplete: true,
-            removeOnFail: true,
-          }
-        );
-        logger.info({ callId }, 'Call metering started');
-      } else {
-        logger.info({ callId }, 'Call metering disabled - continuing without metering');
+    const timer = setTimeout(async () => {
+      try {
+        logger.info({ callId }, 'Auto-ending call - time limit reached');
+
+        const currentCall = await Call.findById(callId);
+        if (!currentCall || currentCall.status === CallStatus.ENDED) {
+          return; // Call already ended
+        }
+
+        // End call and deduct coins
+        await this.endCallAndDeductCoins(currentCall);
+
+        // Notify both parties
+        emitToUser(currentCall.userId.toString(), 'call_ended', {
+          callId,
+          reason: 'time_limit_reached',
+        });
+        emitToUser(currentCall.responderId.toString(), 'call_ended', {
+          callId,
+          reason: 'time_limit_reached',
+        });
+      } catch (error: any) {
+        logger.error({ error: error.message, callId }, 'Failed to auto-end call');
+      } finally {
+        callTimers.delete(callId);
       }
-    } catch (error: any) {
-      logger.warn({ error: error.message, callId }, 'Failed to start call metering - continuing without metering');
-      // Don't throw error - call should continue even if metering fails
+    }, durationMs);
+
+    callTimers.set(callId, timer);
+    logger.info({ callId, durationMs }, 'Call termination scheduled');
+  },
+
+  // Calculate actual duration and deduct proportional coins
+  async endCallAndDeductCoins(call: any) {
+    // Calculate actual duration
+    if (!call.startTime) {
+      call.status = CallStatus.ENDED;
+      call.endTime = new Date();
+      call.durationSeconds = 0;
+      call.coinsCharged = 0;
+      await call.save();
+      return;
     }
+
+    const endTime = new Date();
+    const durationMs = endTime.getTime() - call.startTime.getTime();
+    const durationSeconds = Math.floor(durationMs / 1000);
+
+    // Calculate coins to deduct based on actual duration
+    const callType = call.type === CallType.AUDIO ? 'audio' : 'video';
+    const rate = await coinService.getCallRate(callType);
+
+    // rate is coins per minute, calculate proportional coins for actual duration
+    const coinsToDeduct = Math.ceil((durationSeconds / 60) * rate);
+
+    // Deduct coins from user
+    const user = await User.findById(call.userId);
+    if (user) {
+      const actualDeduction = Math.min(coinsToDeduct, user.coinBalance);
+      user.coinBalance -= actualDeduction;
+      await user.save();
+
+      // Get commission config
+      const commissionConfig = await CommissionConfig.findOne({ isActive: true });
+      const responderPercentage = commissionConfig?.responderCommissionPercentage || 50;
+
+      // Calculate responder earnings
+      const responderCoins = Math.floor(actualDeduction * (responderPercentage / 100));
+
+      // Credit responder
+      let responder = await Responder.findOne({ userId: call.responderId });
+      if (!responder) {
+        // Create responder record if doesn't exist
+        responder = await Responder.create({
+          userId: call.responderId,
+          earnings: {
+            totalCoins: responderCoins,
+            pendingCoins: responderCoins,
+            lockedCoins: 0,
+            redeemedCoins: 0,
+          },
+        });
+      } else {
+        responder.earnings.totalCoins += responderCoins;
+        responder.earnings.pendingCoins += responderCoins;
+        await responder.save();
+      }
+
+      // Create transaction record for user
+      await Transaction.create([
+        {
+          userId: call.userId,
+          responderId: call.responderId,
+          coins: actualDeduction,
+          type: TransactionType.CALL,
+          status: TransactionStatus.COMPLETED,
+          meta: {
+            callId: String(call._id),
+            callType: call.type,
+            durationSeconds,
+            description: `${call.type} call - ${durationSeconds}s`,
+          },
+        },
+      ]);
+
+      call.coinsCharged = actualDeduction;
+
+      logger.info({
+        callId: String(call._id),
+        durationSeconds,
+        coinsDeducted: actualDeduction,
+        responderEarned: responderCoins,
+        commissionRate: responderPercentage,
+        userBalance: user.coinBalance,
+        responderPending: responder.earnings.pendingCoins,
+      }, 'Coins deducted for call and responder credited');
+    }
+
+    // Update call
+    call.status = CallStatus.ENDED;
+    call.endTime = endTime;
+    call.durationSeconds = durationSeconds;
+    await call.save();
+
+    // Create call history message
+    await this.createCallMessage(call);
   },
 
   async handleCallConnectionFailure(callId: string, userId: string, reason: string) {
@@ -293,31 +412,16 @@ export const callService = {
       throw new AppError(400, 'Call already ended');
     }
 
-    // Stop metering job (if Redis is enabled) - Don't let this fail the call ending
-    try {
-      const queue = await getCallMeteringQueue();
-      if (queue) {
-        await queue.removeRepeatableByKey(`meter-${String(call._id)}`);
-        logger.info({ callId: String(call._id) }, 'Call metering stopped');
-      }
-    } catch (error) {
-      logger.warn({ error: error.message, callId: String(call._id) }, 'Failed to stop call metering - call ended anyway');
-      // Don't throw error - call should end even if metering cleanup fails
+    // Cancel scheduled termination if exists
+    const timer = callTimers.get(String(call._id));
+    if (timer) {
+      clearTimeout(timer);
+      callTimers.delete(String(call._id));
+      logger.info({ callId: String(call._id) }, 'Cancelled scheduled call termination');
     }
 
-    // Calculate duration
-    if (call.startTime) {
-      const endTime = new Date();
-      const durationMs = endTime.getTime() - call.startTime.getTime();
-      call.durationSeconds = Math.floor(durationMs / 1000);
-      call.endTime = endTime;
-    }
-
-    call.status = CallStatus.ENDED;
-    await call.save();
-
-    // Create call history message in chat
-    await this.createCallMessage(call);
+    // Calculate actual duration and deduct coins
+    await this.endCallAndDeductCoins(call);
 
     // Emit socket event to both parties that call has ended
     emitToUser(call.userId.toString(), 'call_ended', {
