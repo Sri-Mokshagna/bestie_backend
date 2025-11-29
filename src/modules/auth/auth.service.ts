@@ -9,9 +9,9 @@ export const authService = {
   async adminLogin(email: string, password: string) {
     try {
       // Find admin user by email (include password field)
-      const user = await User.findOne({ 
+      const user = await User.findOne({
         'profile.email': email,
-        role: UserRole.ADMIN 
+        role: UserRole.ADMIN
       }).select('+password');
 
       if (!user) {
@@ -76,7 +76,7 @@ export const authService = {
   async verifyFirebaseToken(idToken: string) {
     try {
       console.log('🔐 Verifying Firebase token...');
-      
+
       // Verify Firebase ID token
       let decodedToken;
       try {
@@ -129,7 +129,7 @@ export const authService = {
           firebaseUid: user.firebaseUid,
           role: user.role,
         });
-        
+
         // Initialize user with default coins
         try {
           await coinService.initializeUserCoins(user.id);
@@ -249,19 +249,50 @@ export const authService = {
   },
 
   async updateUserRole(userId: string, role: UserRole, voiceText?: string, voiceBlob?: string) {
+    console.log('🔄 Updating user role:', {
+      userId,
+      requestedRole: role,
+      hasVoiceText: !!voiceText,
+      hasVoiceBlob: !!voiceBlob,
+    });
+
     const user = await User.findById(userId);
     if (!user) {
+      console.error('❌ User not found for role update:', userId);
       throw new AppError(404, 'User not found');
     }
 
+    console.log('📝 Current user state:', {
+      userId: user.id,
+      currentRole: user.role,
+      phone: user.phone,
+    });
+
+    // Validate role
+    const validRoles = Object.values(UserRole);
+    if (!validRoles.includes(role)) {
+      console.error('❌ Invalid role provided:', role);
+      throw new AppError(400, `Invalid role. Must be one of: ${validRoles.join(', ')}`);
+    }
+
+    const previousRole = user.role;
     user.role = role;
+
     if (voiceText) {
       user.profile.voiceText = voiceText;
     }
     if (voiceBlob) {
       user.profile.voiceBlob = voiceBlob;
     }
+
     await user.save();
+
+    console.log('✅ User role updated successfully:', {
+      userId: user.id,
+      previousRole,
+      newRole: user.role,
+      phone: user.phone,
+    });
 
     return {
       id: user.id,
@@ -296,7 +327,7 @@ export const authService = {
     if (profileData.bio !== undefined) {
       user.profile.bio = profileData.bio;
     }
-    
+
     // Handle avatar upload
     if (profileData.avatarBase64) {
       // In a real implementation, you would upload to a cloud storage service

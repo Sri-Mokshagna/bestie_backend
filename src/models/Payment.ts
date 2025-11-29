@@ -93,7 +93,7 @@ const paymentSchema = new Schema<IPayment>(
 
 // Indexes
 paymentSchema.index({ userId: 1, createdAt: -1 });
-paymentSchema.index({ orderId: 1 });
+// Note: orderId index is automatically created by unique: true constraint
 paymentSchema.index({ cashfreeOrderId: 1 });
 paymentSchema.index({ status: 1 });
 

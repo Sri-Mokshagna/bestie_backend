@@ -6,19 +6,20 @@ import { AppError } from '../../middleware/errorHandler';
 import { logger } from '../../lib/logger';
 import { emitToUser } from '../../lib/socket';
 import { coinService } from '../../services/coinService';
+import redis from '../../lib/redis';
 
-// Make call metering optional based on Redis availability
-const REDIS_ENABLED = process.env.REDIS_ENABLED !== 'false';
+// Check if Redis is actually enabled (from redis.ts config, not env var)
+const REDIS_ENABLED = redis !== null;
 
 async function getCallMeteringQueue() {
   if (!REDIS_ENABLED) {
-    logger.debug('Call metering disabled - Redis not enabled');
+    // Redis is disabled, return null immediately without dynamic import
     return null;
   }
   try {
     const mod = await import('../../jobs/callMetering');
     return mod.callMeteringQueue as any;
-  } catch (error) {
+  } catch (error: any) {
     logger.warn({ error: error.message }, 'Call metering disabled - Redis not available');
     return null;
   }
@@ -183,14 +184,11 @@ export const callService = {
     return call;
   },
 
-  // Helper method to start metering asynchronously
+  // Helper method to start metering completely asynchronously
   async startCallMetering(callId: string) {
     try {
-      // Add a timeout to getting the queue to prevent hanging
-      const queuePromise = getCallMeteringQueue();
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
-
-      const queue = await Promise.race([queuePromise, timeoutPromise]);
+      // Try to get queue but don't wait if Redis is slow/disabled
+      const queue = await getCallMeteringQueue();
 
       if (queue) {
         await queue.add(
@@ -207,9 +205,9 @@ export const callService = {
         );
         logger.info({ callId }, 'Call metering started');
       } else {
-        logger.info({ callId }, 'Call metering disabled or timed out - continuing without metering');
+        logger.info({ callId }, 'Call metering disabled - continuing without metering');
       }
-    } catch (error) {
+    } catch (error: any) {
       logger.warn({ error: error.message, callId }, 'Failed to start call metering - continuing without metering');
       // Don't throw error - call should continue even if metering fails
     }
