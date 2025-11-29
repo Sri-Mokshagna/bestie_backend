@@ -207,13 +207,34 @@ export const authService = {
   },
 
   async updateUserGender(userId: string, gender: string) {
+    console.log('🚻 Updating user gender:', {
+      userId,
+      gender,
+    });
+
     const user = await User.findById(userId);
     if (!user) {
+      console.error('❌ User not found for gender update:', userId);
       throw new AppError(404, 'User not found');
     }
 
+    console.log('📝 Current user state before gender update:', {
+      userId: user.id,
+      currentGender: user.profile?.gender,
+      currentRole: user.role,
+      phone: user.phone,
+    });
+
     user.profile.gender = gender;
     await user.save();
+
+    console.log('✅ User gender updated successfully:', {
+      userId: user.id,
+      newGender: user.profile.gender,
+      currentRole: user.role,
+      phone: user.phone,
+      note: gender === 'female' ? 'User should now proceed to voice recording screen' : 'User should proceed to dashboard',
+    });
 
     return {
       id: user.id,
