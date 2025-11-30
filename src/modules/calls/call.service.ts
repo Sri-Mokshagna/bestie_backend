@@ -70,16 +70,27 @@ export const callService = {
     });
 
     if (activeCall) {
-      // Auto-mark old ringing calls as missed (older than 60 seconds)
       const now = new Date();
       const callAge = now.getTime() - activeCall.createdAt.getTime();
 
+      // Auto-cleanup stale calls based on status
       if (activeCall.status === CallStatus.RINGING && callAge > 60000) {
-        // Mark as missed and allow new call
+        // RINGING calls older than 60 seconds - mark as missed
+        logger.info({ callId: String(activeCall._id) }, 'Auto-ending stale RINGING call');
         activeCall.status = CallStatus.MISSED;
         activeCall.endTime = now;
         await activeCall.save();
+      } else if (
+        (activeCall.status === CallStatus.CONNECTING || activeCall.status === CallStatus.ACTIVE) &&
+        callAge > 300000 // 5 minutes
+      ) {
+        // CONNECTING/ACTIVE calls older than 5 minutes - likely stale
+        logger.info({ callId: String(activeCall._id) }, 'Auto-ending stale CONNECTING/ACTIVE call');
+        activeCall.status = CallStatus.ENDED;
+        activeCall.endTime = now;
+        await activeCall.save();
       } else {
+        // Call is recent, responder is genuinely busy
         throw new AppError(400, 'Responder is busy');
       }
     }
