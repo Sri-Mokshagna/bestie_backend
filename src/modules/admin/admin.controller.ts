@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { User } from '../../models/User';
+import { User, UserStatus } from '../../models/User';
 import { Call } from '../../models/Call';
 import { Transaction } from '../../models/Transaction';
 import { Payout } from '../../models/Payout';
@@ -167,7 +167,7 @@ export const blockUser = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    user.status = block ? 'suspended' : 'active';
+    user.status = block ? UserStatus.SUSPENDED : UserStatus.ACTIVE;
     await user.save();
 
     logger.info({ userId, block }, 'User block status updated by admin');

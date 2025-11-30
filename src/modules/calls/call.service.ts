@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Call, CallType, CallStatus } from '../../models/Call';
-import { User } from '../../models/User';
+import { User, UserRole, UserStatus } from '../../models/User';
 import { Chat, Message, MessageType } from '../../models/Chat';
 import { Transaction, TransactionType, TransactionStatus } from '../../models/Transaction';
 import { Responder } from '../../models/Responder';
