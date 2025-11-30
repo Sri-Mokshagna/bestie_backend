@@ -11,6 +11,8 @@ router.get('/:responderId', asyncHandler(responderController.getResponderById));
 
 // Responder routes (authenticated)
 router.patch('/status', authenticate, asyncHandler(responderController.toggleOnlineStatus));
+router.put('/availability', authenticate, asyncHandler(responderController.updateAvailabilityStatus));
+router.get('/availability', authenticate, asyncHandler(responderController.getAvailabilityStatus));
 router.post('/apply', authenticate, asyncHandler(responderController.applyAsResponder));
 
 // Admin routes (authenticated + admin role)

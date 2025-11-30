@@ -47,6 +47,39 @@ export const responderController = {
     res.json({ responder });
   },
 
+  async updateAvailabilityStatus(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { isOnline, isAvailableForCalls } = req.body;
+
+    if (isOnline !== undefined && typeof isOnline !== 'boolean') {
+      throw new AppError(400, 'isOnline must be a boolean');
+    }
+
+    if (isAvailableForCalls !== undefined && typeof isAvailableForCalls !== 'boolean') {
+      throw new AppError(400, 'isAvailableForCalls must be a boolean');
+    }
+
+    const status = await responderService.updateAvailabilityStatus(req.user.id, {
+      isOnline,
+      isAvailableForCalls,
+    });
+
+    res.json({ status });
+  },
+
+  async getAvailabilityStatus(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const status = await responderService.getAvailabilityStatus(req.user.id);
+
+    res.json({ status });
+  },
+
   async applyAsResponder(req: AuthRequest, res: Response) {
     if (!req.user) {
       throw new AppError(401, 'Not authenticated');

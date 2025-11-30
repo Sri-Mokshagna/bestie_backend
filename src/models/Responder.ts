@@ -27,6 +27,7 @@ export interface IEarnings {
 export interface IResponder extends Document {
   userId: Types.ObjectId;
   isOnline: boolean;
+  isAvailableForCalls: boolean;
   kycStatus: KycStatus;
   kycDocs: IKycDocs;
   bankDetails?: string; // Encrypted JSON string
@@ -50,6 +51,11 @@ const responderSchema = new Schema<IResponder>(
     isOnline: {
       type: Boolean,
       default: false,
+      index: true,
+    },
+    isAvailableForCalls: {
+      type: Boolean,
+      default: true,
       index: true,
     },
     kycStatus: {
@@ -90,6 +96,7 @@ const responderSchema = new Schema<IResponder>(
 
 // Indexes
 responderSchema.index({ isOnline: 1, kycStatus: 1 });
+responderSchema.index({ isOnline: 1, isAvailableForCalls: 1 });
 responderSchema.index({ rating: -1 });
 
 export const Responder = model<IResponder>('Responder', responderSchema);

@@ -63,6 +63,12 @@ export const callService = {
       throw new AppError(400, 'Responder is currently offline', 'RESPONDER_OFFLINE');
     }
 
+    // Check if responder is available for calls
+    const responderProfile = await Responder.findOne({ userId: responderId });
+    if (responderProfile && !responderProfile.isAvailableForCalls) {
+      throw new AppError(400, 'Responder is not available to take calls', 'RESPONDER_NOT_AVAILABLE');
+    }
+
     // Check if responder is available (not busy with another call)
     const activeCall = await Call.findOne({
       responderId: responderId,
@@ -91,7 +97,7 @@ export const callService = {
         await activeCall.save();
       } else {
         // Call is recent, responder is genuinely busy
-        throw new AppError(400, 'Responder is busy');
+        throw new AppError(400, 'Responder is in another call', 'RESPONDER_IN_CALL');
       }
     }
 

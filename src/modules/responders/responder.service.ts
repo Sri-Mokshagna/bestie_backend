@@ -13,6 +13,7 @@ export const responderService = {
 
     if (onlineOnly) {
       query.isOnline = true;
+      query.isAvailableForCalls = true; // Only show responders available for calls
     }
 
     const responders = await Responder.find(query)
@@ -40,7 +41,7 @@ export const responderService = {
       const otherLanguageResponders = respondersWithUsers.filter(
         (item) => item.user?.profile?.language !== userLanguage
       );
-      
+
       return [...sameLanguageResponders, ...otherLanguageResponders];
     }
 
@@ -78,6 +79,48 @@ export const responderService = {
     await responder.save();
 
     return responder;
+  },
+
+  async updateAvailabilityStatus(
+    userId: string,
+    updates: { isOnline?: boolean; isAvailableForCalls?: boolean }
+  ) {
+    const responder = await Responder.findOne({ userId });
+
+    if (!responder) {
+      throw new AppError(404, 'Responder profile not found');
+    }
+
+    if (updates.isOnline !== undefined) {
+      responder.isOnline = updates.isOnline;
+      responder.lastOnlineAt = new Date();
+    }
+
+    if (updates.isAvailableForCalls !== undefined) {
+      responder.isAvailableForCalls = updates.isAvailableForCalls;
+    }
+
+    await responder.save();
+
+    return {
+      isOnline: responder.isOnline,
+      isAvailableForCalls: responder.isAvailableForCalls,
+      lastOnlineAt: responder.lastOnlineAt,
+    };
+  },
+
+  async getAvailabilityStatus(userId: string) {
+    const responder = await Responder.findOne({ userId }).lean();
+
+    if (!responder) {
+      throw new AppError(404, 'Responder profile not found');
+    }
+
+    return {
+      isOnline: responder.isOnline,
+      isAvailableForCalls: responder.isAvailableForCalls,
+      lastOnlineAt: responder.lastOnlineAt,
+    };
   },
 
   async applyAsResponder(
