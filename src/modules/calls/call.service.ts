@@ -30,9 +30,10 @@ export const callService = {
 
     // Check if user has sufficient coins for at least 1 minute
     const minDuration = 60; // 1 minute in seconds
-    const callType = type === CallType.AUDIO ? 'audio' : 'video';
     const config = await coinService.getConfig();
-    const ratePerMinute = config.callRates[callType];
+    const ratePerMinute = type === CallType.AUDIO
+      ? config.audioCallCoinsPerMinute
+      : config.videoCallCoinsPerMinute;
     const minCoinsRequired = Math.ceil((ratePerMinute / 60) * minDuration);
 
     if (user.coinBalance < minCoinsRequired) {
