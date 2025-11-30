@@ -13,6 +13,8 @@ router.use(authorize(UserRole.ADMIN));
 router.get('/users', adminController.getAllUsers);
 router.get('/users/:userId', adminController.getUserDetails);
 router.put('/users/:userId/status', adminController.updateUserStatus);
+router.delete('/users/:userId', adminController.deleteUser);
+router.put('/users/:userId/block', adminController.blockUser);
 
 // Responder management
 router.get('/responders', adminController.getAllResponders);

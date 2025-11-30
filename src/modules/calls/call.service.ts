@@ -29,31 +29,43 @@ export const callService = {
     }
 
     // Check if user has sufficient coins for at least 1 minute
-    const rate = await coinService.getCallRate(type === CallType.AUDIO ? 'audio' : 'video');
-    if (user.coinBalance < rate) {
-      throw new AppError(400, 'Insufficient coins for call. Please purchase more coins.', 'INSUFFICIENT_COINS');
+    const minDuration = 60; // 1 minute in seconds
+    const callType = type === CallType.AUDIO ? 'audio' : 'video';
+    const config = await coinService.getConfig();
+    const ratePerMinute = config.callRates[callType];
+    const minCoinsRequired = Math.ceil((ratePerMinute / 60) * minDuration);
+
+    if (user.coinBalance < minCoinsRequired) {
+      throw new AppError(
+        400,
+        `Insufficient coins. You need at least ${minCoinsRequired} coins for a ${type} call.`,
+        'INSUFFICIENT_COINS'
+      );
     }
 
-    // Find responder user (responderId is the User._id with role 'responder')
+    // Verify responder exists and has correct role
     const responderUser = await User.findById(responderId);
-
     if (!responderUser) {
       throw new AppError(404, 'Responder not found');
     }
 
-    if (responderUser.role !== 'responder') {
-      throw new AppError(400, 'User is not a responder');
+    if (responderUser.role !== UserRole.RESPONDER) {
+      throw new AppError(400, 'Selected user is not a responder');
     }
 
-    // TODO: Add isOnline check when implemented
-    // if (!responderUser.isOnline) {
-    //   throw new AppError(400, 'Responder is offline');
-    // }
+    if (responderUser.status !== UserStatus.ACTIVE) {
+      throw new AppError(400, 'Responder account is not active');
+    }
 
-    // Check if responder is already on a call
+    // Check if responder is online
+    if (!responderUser.isOnline) {
+      throw new AppError(400, 'Responder is currently offline', 'RESPONDER_OFFLINE');
+    }
+
+    // Check if responder is available (not busy with another call)
     const activeCall = await Call.findOne({
-      responderId: responderUser._id,
-      status: { $in: [CallStatus.RINGING, CallStatus.ACTIVE] },
+      responderId: responderId,
+      status: { $in: [CallStatus.RINGING, CallStatus.CONNECTING, CallStatus.ACTIVE] },
     });
 
     if (activeCall) {
@@ -490,20 +502,25 @@ export const callService = {
       .lean();
 
     // Format calls with populated user data
-    return calls.map(call => ({
-      id: String(call._id),
-      userId: call.userId._id.toString(),
-      responderId: call.responderId._id.toString(),
-      user: call.userId,
-      responder: call.responderId,
-      type: call.type,
-      status: call.status,
-      startTime: call.startTime,
-      endTime: call.endTime,
-      duration: call.durationSeconds || 0,
-      coinsCharged: call.coinsCharged,
-      createdAt: call.createdAt,
-    }));
+    return calls.map(call => {
+      const user = call.userId || { _id: call.userId, profile: { name: 'Unknown User' }, phone: '' };
+      const responder = call.responderId || { _id: call.responderId, profile: { name: 'Unknown Responder' }, phone: '' };
+
+      return {
+        id: String(call._id),
+        userId: user._id ? String(user._id) : String(call.userId),
+        responderId: responder._id ? String(responder._id) : String(call.responderId),
+        user: user,
+        responder: responder,
+        type: call.type,
+        status: call.status,
+        startTime: call.startTime,
+        endTime: call.endTime,
+        duration: call.durationSeconds || 0,
+        coinsCharged: call.coinsCharged,
+        createdAt: call.createdAt,
+      };
+    });
   },
 
   async updateCallDuration(callId: string, durationSeconds: number) {

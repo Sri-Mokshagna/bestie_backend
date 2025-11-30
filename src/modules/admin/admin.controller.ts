@@ -11,7 +11,7 @@ export const getAllUsers = async (req: Request, res: Response) => {
     const { page = 1, limit = 20, search, role } = req.query;
 
     const query: any = {};
-    
+
     if (search) {
       query.$or = [
         { 'profile.name': { $regex: search, $options: 'i' } },
@@ -128,6 +128,56 @@ export const updateUserStatus = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Update user status error:', error);
     res.status(500).json({ error: 'Failed to update user status' });
+  }
+};
+
+// Delete user
+export const deleteUser = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Delete the user
+    await User.findByIdAndDelete(userId);
+
+    logger.info({ userId }, 'User deleted by admin');
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    logger.error(error, 'Delete user error');
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+};
+
+// Block/unblock user
+export const blockUser = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { block } = req.body;
+
+    if (typeof block !== 'boolean') {
+      return res.status(400).json({ error: 'block must be a boolean' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    user.status = block ? 'suspended' : 'active';
+    await user.save();
+
+    logger.info({ userId, block }, 'User block status updated by admin');
+    res.json({
+      message: `User ${block ? 'blocked' : 'unblocked'} successfully`,
+      user
+    });
+  } catch (error) {
+    logger.error(error, 'Block user error');
+    res.status(500).json({ error: 'Failed to update user block status' });
   }
 };
 
