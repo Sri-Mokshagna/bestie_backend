@@ -17,7 +17,7 @@ import authRoutes from './modules/auth/auth.routes';
 import walletRoutes from './modules/wallet/wallet.routes';
 import callRoutes from './modules/calls/call.routes';
 import chatRoutes from './modules/chat/chat.routes';
-import responderRoutes from './modules/responder/responder.routes';
+import responderRoutes from './modules/responders/responder.routes';
 import uploadRoutes from './modules/upload/upload.routes';
 import notificationRoutes from './modules/notifications/notification.routes';
 import payoutRoutes from './modules/responder/payout.routes';
