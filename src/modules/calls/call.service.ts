@@ -427,6 +427,12 @@ export const callService = {
   async endCall(callId: string, userId: string) {
     const call = await Call.findById(callId);
 
+    logger.info({
+      callId,
+      userId,
+      callFound: !!call
+    }, '🔴 endCall called');
+
     if (!call) {
       throw new AppError(404, 'Call not found');
     }
@@ -439,8 +445,17 @@ export const callService = {
     }
 
     if (call.status === CallStatus.ENDED) {
+      logger.warn({ callId, userId, status: call.status }, '⚠️ Call already ended');
       throw new AppError(400, 'Call already ended');
     }
+
+    logger.info({
+      callId: String(call._id),
+      caller: call.userId.toString(),
+      responder: call.responderId.toString(),
+      status: call.status,
+      endedBy: userId
+    }, '📞 Ending call');
 
     // Cancel scheduled termination if exists
     const timer = callTimers.get(String(call._id));
@@ -453,6 +468,12 @@ export const callService = {
     // Calculate actual duration and deduct coins
     await this.endCallAndDeductCoins(call);
 
+    logger.info({
+      callId: String(call._id),
+      caller: call.userId.toString(),
+      responder: call.responderId.toString()
+    }, '📤 Emitting call_ended events to both parties');
+
     // Emit socket event to both parties that call has ended
     emitToUser(call.userId.toString(), 'call_ended', {
       callId: String(call._id),
@@ -460,6 +481,8 @@ export const callService = {
     emitToUser(call.responderId.toString(), 'call_ended', {
       callId: String(call._id),
     });
+
+    logger.info({ callId: String(call._id) }, '✅ Call ended successfully');
 
     return call;
   },
