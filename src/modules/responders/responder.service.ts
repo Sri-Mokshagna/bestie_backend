@@ -13,7 +13,12 @@ export const responderService = {
 
     if (onlineOnly) {
       query.isOnline = true;
-      query.isAvailableForCalls = true; // Only show responders available for calls
+      // Show responders who have at least one communication method enabled
+      query.$or = [
+        { audioEnabled: true },
+        { videoEnabled: true },
+        { chatEnabled: true },
+      ];
     }
 
     const responders = await Responder.find(query)
@@ -83,7 +88,12 @@ export const responderService = {
 
   async updateAvailabilityStatus(
     userId: string,
-    updates: { isOnline?: boolean; isAvailableForCalls?: boolean }
+    updates: {
+      isOnline?: boolean;
+      audioEnabled?: boolean;
+      videoEnabled?: boolean;
+      chatEnabled?: boolean;
+    }
   ) {
     const responder = await Responder.findOne({ userId });
 
@@ -96,15 +106,25 @@ export const responderService = {
       responder.lastOnlineAt = new Date();
     }
 
-    if (updates.isAvailableForCalls !== undefined) {
-      responder.isAvailableForCalls = updates.isAvailableForCalls;
+    if (updates.audioEnabled !== undefined) {
+      responder.audioEnabled = updates.audioEnabled;
+    }
+
+    if (updates.videoEnabled !== undefined) {
+      responder.videoEnabled = updates.videoEnabled;
+    }
+
+    if (updates.chatEnabled !== undefined) {
+      responder.chatEnabled = updates.chatEnabled;
     }
 
     await responder.save();
 
     return {
       isOnline: responder.isOnline,
-      isAvailableForCalls: responder.isAvailableForCalls,
+      audioEnabled: responder.audioEnabled,
+      videoEnabled: responder.videoEnabled,
+      chatEnabled: responder.chatEnabled,
       lastOnlineAt: responder.lastOnlineAt,
     };
   },
@@ -118,7 +138,10 @@ export const responderService = {
 
     return {
       isOnline: responder.isOnline,
-      isAvailableForCalls: responder.isAvailableForCalls,
+      audioEnabled: responder.audioEnabled,
+      videoEnabled: responder.videoEnabled,
+      chatEnabled: responder.chatEnabled,
+      inCall: responder.inCall,
       lastOnlineAt: responder.lastOnlineAt,
     };
   },

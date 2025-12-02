@@ -63,10 +63,18 @@ export const callService = {
       throw new AppError(400, 'Responder is currently offline', 'RESPONDER_OFFLINE');
     }
 
-    // Check if responder is available for calls
+    // Check if responder is available for this type of call
     const responderProfile = await Responder.findOne({ userId: responderId });
-    if (responderProfile && !responderProfile.isAvailableForCalls) {
-      throw new AppError(400, 'Responder is not available to take calls', 'RESPONDER_NOT_AVAILABLE');
+    if (responderProfile) {
+      if (type === CallType.AUDIO && !responderProfile.audioEnabled) {
+        throw new AppError(400, 'Responder is not available for audio calls', 'RESPONDER_NOT_AVAILABLE');
+      }
+      if (type === CallType.VIDEO && !responderProfile.videoEnabled) {
+        throw new AppError(400, 'Responder is not available for video calls', 'RESPONDER_NOT_AVAILABLE');
+      }
+      if (responderProfile.inCall) {
+        throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
+      }
     }
 
     // Check if responder is available (not busy with another call)
