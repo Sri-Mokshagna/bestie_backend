@@ -8,10 +8,12 @@ export const responderService = {
       status: UserStatus.ACTIVE,
     };
 
-    // For now, we'll simulate online status since we don't have real-time tracking
-    // In a real app, you'd track online status with socket connections or heartbeat
+    // If onlineOnly is requested, add online filter
+    if (onlineOnly) {
+      query.isOnline = true;
+    }
 
-    const responders = await User.find(query).select('-password');
+    const responders = await User.find(query).select('-password').lean();
 
     // Transform to include responder-specific data
     const respondersWithData = responders.map(user => ({
@@ -29,39 +31,27 @@ export const responderService = {
       },
       responder: {
         id: (user._id as any).toString(),
+        userId: (user._id as any).toString(),
         bio: user.profile.bio || null,
         rating: 4.5, // Mock rating - in real app, calculate from reviews
         totalCalls: 0, // Mock data - in real app, count from calls collection
         isOnline: user.isOnline || false,
-        isAvailable: user.isAvailable !== undefined ? user.isAvailable : true,
-        specializations: [], // Mock data - in real app, store in responder profile
-        languages: ['English'], // Mock data
-        experience: '1 year', // Mock data
-        responseTime: '< 5 min', // Mock data
-        availability: {
-          monday: { start: '09:00', end: '17:00' },
-          tuesday: { start: '09:00', end: '17:00' },
-          wednesday: { start: '09:00', end: '17:00' },
-          thursday: { start: '09:00', end: '17:00' },
-          friday: { start: '09:00', end: '17:00' },
-          saturday: { start: '10:00', end: '16:00' },
-          sunday: { start: '10:00', end: '16:00' },
-        },
+        audioEnabled: user.audioEnabled !== undefined ? user.audioEnabled : true,
+        videoEnabled: user.videoEnabled !== undefined ? user.videoEnabled : true,
+        chatEnabled: user.chatEnabled !== undefined ? user.chatEnabled : true,
+        inCall: user.inCall || false,
+        kycStatus: 'verified', // All active responders are verified
+        voiceGender: 'original',
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
     }));
 
-    // Filter by online status if requested
-    if (onlineOnly) {
-      return respondersWithData.filter(r => r.responder.isOnline);
-    }
-
     return respondersWithData;
   },
 
   async getResponderById(responderId: string) {
-    const user = await User.findById(responderId).select('-password');
+    const user = await User.findById(responderId).select('-password').lean();
 
     if (!user) {
       throw new AppError(404, 'Responder not found');
@@ -90,24 +80,17 @@ export const responderService = {
       },
       responder: {
         id: (user._id as any).toString(),
+        userId: (user._id as any).toString(),
         bio: user.profile.bio || null,
         rating: 4.5, // Mock rating
         totalCalls: 0, // Mock data
         isOnline: user.isOnline || false,
-        isAvailable: user.isAvailable !== undefined ? user.isAvailable : true,
-        specializations: [], // Mock data
-        languages: ['English'], // Mock data
-        experience: '1 year', // Mock data
-        responseTime: '< 5 min', // Mock data
-        availability: {
-          monday: { start: '09:00', end: '17:00' },
-          tuesday: { start: '09:00', end: '17:00' },
-          wednesday: { start: '09:00', end: '17:00' },
-          thursday: { start: '09:00', end: '17:00' },
-          friday: { start: '09:00', end: '17:00' },
-          saturday: { start: '10:00', end: '16:00' },
-          sunday: { start: '10:00', end: '16:00' },
-        },
+        audioEnabled: user.audioEnabled !== undefined ? user.audioEnabled : true,
+        videoEnabled: user.videoEnabled !== undefined ? user.videoEnabled : true,
+        chatEnabled: user.chatEnabled !== undefined ? user.chatEnabled : true,
+        inCall: user.inCall || false,
+        kycStatus: 'verified',
+        voiceGender: 'original',
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
@@ -125,7 +108,7 @@ export const responderService = {
       throw new AppError(400, 'User is not a responder');
     }
 
-    // Update online status and availability
+    // Update online status
     user.isOnline = isOnline;
     if (isAvailable !== undefined) {
       user.isAvailable = isAvailable;
