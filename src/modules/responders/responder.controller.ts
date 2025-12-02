@@ -52,20 +52,37 @@ export const responderController = {
       throw new AppError(401, 'Not authenticated');
     }
 
-    const { isOnline, isAvailableForCalls } = req.body;
+    const { isOnline, audioEnabled, videoEnabled, chatEnabled } = req.body;
 
     if (isOnline !== undefined && typeof isOnline !== 'boolean') {
       throw new AppError(400, 'isOnline must be a boolean');
     }
 
-    if (isAvailableForCalls !== undefined && typeof isAvailableForCalls !== 'boolean') {
-      throw new AppError(400, 'isAvailableForCalls must be a boolean');
+    if (audioEnabled !== undefined && typeof audioEnabled !== 'boolean') {
+      throw new AppError(400, 'audioEnabled must be a boolean');
     }
 
-    const status = await responderService.updateAvailabilityStatus(req.user.id, {
-      isOnline,
-      isAvailableForCalls,
-    });
+    if (videoEnabled !== undefined && typeof videoEnabled !== 'boolean') {
+      throw new AppError(400, 'videoEnabled must be a boolean');
+    }
+
+    if (chatEnabled !== undefined && typeof chatEnabled !== 'boolean') {
+      throw new AppError(400, 'chatEnabled must be a boolean');
+    }
+
+    const updates: {
+      isOnline?: boolean;
+      audioEnabled?: boolean;
+      videoEnabled?: boolean;
+      chatEnabled?: boolean;
+    } = {};
+
+    if (isOnline !== undefined) updates.isOnline = isOnline;
+    if (audioEnabled !== undefined) updates.audioEnabled = audioEnabled;
+    if (videoEnabled !== undefined) updates.videoEnabled = videoEnabled;
+    if (chatEnabled !== undefined) updates.chatEnabled = chatEnabled;
+
+    const status = await responderService.updateAvailabilityStatus(req.user.id, updates);
 
     res.json({ status });
   },
