@@ -547,8 +547,8 @@ export const callService = {
       ],
       status: { $in: [CallStatus.ENDED, CallStatus.REJECTED, CallStatus.MISSED] },
     })
-      .populate('userId', 'profile phone')
-      .populate('responderId', 'profile phone')
+      .populate('userId', 'profile phone role')
+      .populate('responderId', 'profile phone role audioEnabled videoEnabled chatEnabled inCall')
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
