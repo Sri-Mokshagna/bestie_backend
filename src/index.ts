@@ -32,6 +32,9 @@ import paymentRoutes from './modules/payments/payment.routes';
 import redemptionRoutes from './modules/redemption/redemption.routes';
 import commissionRoutes from './modules/admin/commission.routes';
 import paymentRedirectRoutes from './routes/payment-redirect';
+import transactionRoutes from './modules/transactions/transaction.routes';
+import rewardsRoutes from './modules/rewards/rewards.routes';
+import userRoutes from './modules/users/user.routes';
 
 const app = express();
 const httpServer = createServer(app);
@@ -100,6 +103,9 @@ app.use('/api/admob', admobRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/redemptions', redemptionRoutes);
 app.use('/api/admin/commission', commissionRoutes);
+app.use('/api/transactions', transactionRoutes);
+app.use('/api/rewards', rewardsRoutes);
+app.use('/api/users', userRoutes);
 app.use('/payment', paymentRedirectRoutes);
 app.use('/api', healthRoutes);
 

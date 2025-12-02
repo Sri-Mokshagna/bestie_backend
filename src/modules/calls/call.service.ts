@@ -206,14 +206,17 @@ export const callService = {
     call.initialCoinBalance = user.coinBalance;
     await call.save();
 
-    // Notify both parties that call is now active with max duration
+    // Notify both parties that call is now active with max duration AND server start time
+    const startTimeMs = call.startTime.getTime();
     emitToUser(call.userId.toString(), 'call_connected', {
       callId: String(call._id),
       maxDuration: maxDurationSeconds,
+      startTimeMs, // Server timestamp for synchronization
     });
     emitToUser(call.responderId.toString(), 'call_connected', {
       callId: String(call._id),
       maxDuration: maxDurationSeconds,
+      startTimeMs, // Server timestamp for synchronization
     });
 
     // Schedule automatic call termination

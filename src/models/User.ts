@@ -44,6 +44,9 @@ export interface IUser extends Document {
   isOnline: boolean;
   isAvailable: boolean;
   notificationPreferences?: INotificationPreferences;
+  referralCode?: string; // User's unique referral code
+  referredBy?: string; // Referral code of the user who referred this user
+  blockedUsers?: string[]; // Array of blocked user IDs
   lastOnlineAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -109,6 +112,20 @@ const userSchema = new Schema<IUser>(
       payoutNotifications: { type: Boolean, default: true },
       promotionNotifications: { type: Boolean, default: true },
       systemNotifications: { type: Boolean, default: true },
+    },
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true, // Allow null/undefined while keeping unique
+      index: true,
+    },
+    referredBy: {
+      type: String,
+      index: true,
+    },
+    blockedUsers: {
+      type: [String],
+      default: [],
     },
     lastOnlineAt: {
       type: Date,
