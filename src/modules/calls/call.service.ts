@@ -555,15 +555,25 @@ export const callService = {
 
     // Format calls with populated user data
     return calls.map(call => {
-      const user = call.userId || { _id: call.userId, profile: { name: 'Unknown User' }, phone: '' };
-      const responder = call.responderId || { _id: call.responderId, profile: { name: 'Unknown Responder' }, phone: '' };
+      const user = call.userId as any || { _id: call.userId, profile: { name: 'Unknown User' }, phone: '' };
+      const responder = call.responderId as any || { _id: call.responderId, profile: { name: 'Unknown Responder' }, phone: '' };
 
       return {
         id: String(call._id),
         userId: user._id ? String(user._id) : String(call.userId),
         responderId: responder._id ? String(responder._id) : String(call.responderId),
-        user: user,
-        responder: responder,
+        user: {
+          id: user._id ? String(user._id) : String(call.userId),
+          name: user.profile?.name || user.phone || 'Unknown User',
+          phone: user.phone || '',
+          profile: user.profile || {},
+        },
+        responder: {
+          id: responder._id ? String(responder._id) : String(call.responderId),
+          name: responder.profile?.name || responder.phone || 'Unknown Responder',
+          phone: responder.phone || '',
+          profile: responder.profile || {},
+        },
         type: call.type,
         status: call.status,
         startTime: call.startTime,
