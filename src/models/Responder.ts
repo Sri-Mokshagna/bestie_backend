@@ -27,7 +27,10 @@ export interface IEarnings {
 export interface IResponder extends Document {
   userId: Types.ObjectId;
   isOnline: boolean;
-  isAvailableForCalls: boolean;
+  audioEnabled: boolean;
+  videoEnabled: boolean;
+  chatEnabled: boolean;
+  inCall: boolean;
   kycStatus: KycStatus;
   kycDocs: IKycDocs;
   bankDetails?: string; // Encrypted JSON string
@@ -53,9 +56,24 @@ const responderSchema = new Schema<IResponder>(
       default: false,
       index: true,
     },
-    isAvailableForCalls: {
+    audioEnabled: {
       type: Boolean,
       default: true,
+      index: true,
+    },
+    videoEnabled: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    chatEnabled: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    inCall: {
+      type: Boolean,
+      default: false,
       index: true,
     },
     kycStatus: {
@@ -96,7 +114,7 @@ const responderSchema = new Schema<IResponder>(
 
 // Indexes
 responderSchema.index({ isOnline: 1, kycStatus: 1 });
-responderSchema.index({ isOnline: 1, isAvailableForCalls: 1 });
+responderSchema.index({ isOnline: 1, audioEnabled: 1, videoEnabled: 1, chatEnabled: 1 });
 responderSchema.index({ rating: -1 });
 
 export const Responder = model<IResponder>('Responder', responderSchema);

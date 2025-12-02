@@ -10,9 +10,9 @@ export const responderService = {
 
     // For now, we'll simulate online status since we don't have real-time tracking
     // In a real app, you'd track online status with socket connections or heartbeat
-    
+
     const responders = await User.find(query).select('-password');
-    
+
     // Transform to include responder-specific data
     const respondersWithData = responders.map(user => ({
       id: (user._id as any).toString(),
@@ -62,7 +62,7 @@ export const responderService = {
 
   async getResponderById(responderId: string) {
     const user = await User.findById(responderId).select('-password');
-    
+
     if (!user) {
       throw new AppError(404, 'Responder not found');
     }
@@ -116,7 +116,7 @@ export const responderService = {
 
   async updateResponderStatus(responderId: string, isOnline: boolean, isAvailable?: boolean) {
     const user = await User.findById(responderId);
-    
+
     if (!user) {
       throw new AppError(404, 'Responder not found');
     }
@@ -134,12 +134,43 @@ export const responderService = {
       user.lastOnlineAt = new Date();
     }
     await user.save();
-    
+
     return {
       success: true,
       isOnline: user.isOnline,
       isAvailable: user.isAvailable,
       message: `Status updated to ${isOnline ? 'online' : 'offline'}${isAvailable !== undefined ? ` and ${isAvailable ? 'available' : 'busy'}` : ''}`,
+    };
+  },
+
+  async updateAvailability(
+    responderId: string,
+    audioEnabled: boolean,
+    videoEnabled: boolean,
+    chatEnabled: boolean
+  ) {
+    const user = await User.findById(responderId);
+
+    if (!user) {
+      throw new AppError(404, 'Responder not found');
+    }
+
+    if (user.role !== UserRole.RESPONDER) {
+      throw new AppError(400, 'User is not a responder');
+    }
+
+    // Update availability settings
+    user.audioEnabled = audioEnabled;
+    user.videoEnabled = videoEnabled;
+    user.chatEnabled = chatEnabled;
+    await user.save();
+
+    return {
+      success: true,
+      audioEnabled: user.audioEnabled,
+      videoEnabled: user.videoEnabled,
+      chatEnabled: user.chatEnabled,
+      message: 'Availability settings updated successfully',
     };
   },
 };

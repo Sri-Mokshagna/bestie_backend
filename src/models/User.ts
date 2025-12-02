@@ -43,6 +43,10 @@ export interface IUser extends Document {
   status: UserStatus;
   isOnline: boolean;
   isAvailable: boolean;
+  audioEnabled?: boolean; // For responders
+  videoEnabled?: boolean; // For responders
+  chatEnabled?: boolean; // For responders
+  inCall?: boolean; // For responders - tracks if currently in a call
   notificationPreferences?: INotificationPreferences;
   referralCode?: string; // User's unique referral code
   referredBy?: string; // Referral code of the user who referred this user
@@ -102,6 +106,22 @@ const userSchema = new Schema<IUser>(
     isAvailable: {
       type: Boolean,
       default: true,
+    },
+    audioEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    videoEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    chatEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    inCall: {
+      type: Boolean,
+      default: false,
     },
     notificationPreferences: {
       pushEnabled: { type: Boolean, default: true },
