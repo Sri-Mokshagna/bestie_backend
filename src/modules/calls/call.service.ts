@@ -77,6 +77,11 @@ export const callService = {
       }
     }
 
+    // Check if responder has blocked this user
+    if (responderUser.blockedUsers?.includes(userId)) {
+      throw new AppError(403, 'This responder is not available', 'BLOCKED');
+    }
+
     // Check if responder is available (not busy with another call)
     const activeCall = await Call.findOne({
       responderId: responderId,
