@@ -17,6 +17,7 @@ export enum TicketPriority {
 export enum TicketCategory {
   TECHNICAL = 'technical',
   BILLING = 'billing',
+  PAYMENT_ISSUE = 'payment_issue',
   ACCOUNT = 'account',
   FEATURE_REQUEST = 'feature_request',
   BUG_REPORT = 'bug_report',
