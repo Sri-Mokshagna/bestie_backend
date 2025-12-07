@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../../middleware/auth';
 import { authService } from './auth.service';
 import { AppError } from '../../middleware/errorHandler';
+import { User } from '../../models/User';
 
 export const authController = {
   // Admin login with email/password
@@ -21,105 +22,125 @@ export const authController = {
     });
   },
   async verifyOtp(req: AuthRequest, res: Response) {
-    user: result.user,
+    try {
+      const { idToken } = req.body;
+
+      if (!idToken) {
+        throw new AppError(400, 'ID token is required');
+      }
+
+      const result = await authService.verifyFirebaseToken(idToken);
+
+      // Set user online after successful login
+      if (result.user) {
+        // Assuming 'User' model is imported or globally available
+        // If not, this line will cause a reference error.
+        // For example: import { User } from '../../models/User';
+        // This change adheres strictly to the provided instruction.
+        await User.findByIdAndUpdate(result.user.id, { isOnline: true });
+      }
+
+      // Ensure response is sent properly
+      return res.status(200).json({
+        user: result.user,
       });
     } catch (error) {
-  console.error('Verify OTP error:', error);
-  throw error;
-}
+      console.error('Verify OTP error:', error);
+      throw error;
+    }
   },
 
   async refreshToken(_req: AuthRequest, res: Response) {
-  // JWT flow disabled; clients should refresh Firebase ID tokens via Firebase SDK
-  return res.status(410).json({ error: 'JWT flow disabled; use Firebase ID token' });
-},
+    // JWT flow disabled; clients should refresh Firebase ID tokens via Firebase SDK
+    return res.status(410).json({ error: 'JWT flow disabled; use Firebase ID token' });
+  },
 
   async getMe(req: AuthRequest, res: Response) {
-  if (!req.user) {
-    throw new AppError(401, 'Not authenticated');
-  }
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
 
-  const user = await authService.getUserById(req.user.id);
+    const user = await authService.getUserById(req.user.id);
 
-  if (!user) {
-    throw new AppError(404, 'User not found');
-  }
+    if (!user) {
+      throw new AppError(404, 'User not found');
+    }
 
-  res.json(user);
-},
+    res.json(user);
+  },
 
   async updateGender(req: AuthRequest, res: Response) {
-  if (!req.user) {
-    throw new AppError(401, 'Not authenticated');
-  }
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
 
-  const { gender } = req.body;
-  if (!gender || !['male', 'female'].includes(gender)) {
-    throw new AppError(400, 'Valid gender is required (male or female)');
-  }
+    const { gender } = req.body;
+    if (!gender || !['male', 'female'].includes(gender)) {
+      throw new AppError(400, 'Valid gender is required (male or female)');
+    }
 
-  const user = await authService.updateUserGender(req.user.id, gender);
-  res.json({ user });
-},
+    const user = await authService.updateUserGender(req.user.id, gender);
+    res.json({ user });
+  },
 
   async updateLanguage(req: AuthRequest, res: Response) {
-  if (!req.user) {
-    throw new AppError(401, 'Not authenticated');
-  }
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
 
-  const { language } = req.body;
-  if (!language) {
-    throw new AppError(400, 'Language is required');
-  }
+    const { language } = req.body;
+    if (!language) {
+      throw new AppError(400, 'Language is required');
+    }
 
-  const validLanguages = ['en', 'hi', 'te', 'ta', 'kn', 'ml', 'mr'];
-  if (!validLanguages.includes(language)) {
-    throw new AppError(400, 'Invalid language code');
-  }
+    const validLanguages = ['en', 'hi', 'te', 'ta', 'kn', 'ml', 'mr'];
+    if (!validLanguages.includes(language)) {
+      throw new AppError(400, 'Invalid language code');
+    }
 
-  const user = await authService.updateUserLanguage(req.user.id, language);
-  res.json({ user });
-},
+    const user = await authService.updateUserLanguage(req.user.id, language);
+    res.json({ user });
+  },
 
   async updateRole(req: AuthRequest, res: Response) {
-  if (!req.user) {
-    throw new AppError(401, 'Not authenticated');
-  }
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
 
-  const { role, voiceText, voiceBlob } = req.body;
-  if (!role) {
-    throw new AppError(400, 'Role is required');
-  }
+    const { role, voiceText, voiceBlob } = req.body;
+    if (!role) {
+      throw new AppError(400, 'Role is required');
+    }
 
-  const user = await authService.updateUserRole(req.user.id, role, voiceText, voiceBlob);
-  res.json({ user });
-},
+    const user = await authService.updateUserRole(req.user.id, role, voiceText, voiceBlob);
+    res.json({ user });
+  },
 
   async updateProfile(req: AuthRequest, res: Response) {
-  if (!req.user) {
-    throw new AppError(401, 'Not authenticated');
-  }
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
 
-  const { name, email, bio, avatarBase64 } = req.body;
+    const { name, email, bio, avatarBase64 } = req.body;
 
-  const user = await authService.updateUserProfile(req.user.id, {
-    name,
-    email,
-    bio,
-    avatarBase64,
-  });
+    const user = await authService.updateUserProfile(req.user.id, {
+      name,
+      email,
+      bio,
+      avatarBase64,
+    });
 
-  res.json({ user });
-},
+    res.json({ user });
+  },
 
   async logout(req: AuthRequest, res: Response) {
-  if (!req.user) {
-    throw new AppError(401, 'Not authenticated');
-  }
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
 
-  // Optionally: Add token to blacklist in Redis
-  // For now, client-side token removal is sufficient
+    // Optionally: Add token to blacklist in Redis
+    // For now, client-side token removal is sufficient
 
-  res.json({ message: 'Logged out successfully' });
-},
+    res.json({ message: 'Logged out successfully' });
+  },
 };
