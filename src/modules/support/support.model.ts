@@ -15,6 +15,7 @@ export enum TicketPriority {
 }
 
 export enum TicketCategory {
+  GENERAL = 'general',
   TECHNICAL = 'technical',
   BILLING = 'billing',
   PAYMENT_ISSUE = 'payment_issue',
