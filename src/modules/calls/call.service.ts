@@ -552,32 +552,74 @@ export const callService = {
       ],
       status: { $in: [CallStatus.ENDED, CallStatus.REJECTED, CallStatus.MISSED] },
     })
-      .populate('userId', 'profile phone role')
-      .populate('responderId', 'profile phone role audioEnabled videoEnabled chatEnabled inCall')
+      .populate({
+        path: 'userId',
+        select: 'profile phone role',
+        options: { strictPopulate: false }
+      })
+      .populate({
+        path: 'responderId',
+        select: 'profile phone role',
+        options: { strictPopulate: false }
+      })
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
 
     // Format calls with populated user data
     return calls.map(call => {
-      const user = call.userId as any || { _id: call.userId, profile: { name: 'Unknown User' }, phone: '' };
-      const responder = call.responderId as any || { _id: call.responderId, profile: { name: 'Unknown Responder' }, phone: '' };
+      // Handle user data
+      const userDoc = call.userId as any;
+      const user = userDoc?._id ? {
+        _id: userDoc._id,
+        profile: userDoc.profile || {},
+        phone: userDoc.phone || '',
+        role: userDoc.role
+      } : null;
+
+      // Handle responder data
+      const responderDoc = call.responderId as any;
+      const responder = responderDoc?._id ? {
+        _id: responderDoc._id,
+        profile: responderDoc.profile || {},
+        phone: responderDoc.phone || '',
+        role: responderDoc.role
+      } : null;
+
+      // Extract names with multiple fallback options
+      const userName = user?.profile?.name || user?.phone || 'User';
+      const responderName = responder?.profile?.name || responder?.phone || `Responder ${String(call.responderId).slice(-4)}`;
+
+      // Debug logging for missing names
+      if (!user) {
+        console.log('⚠️ User not found for call:', call._id, 'userId:', call.userId);
+      }
+      if (!responder) {
+        console.log('⚠️ Responder not found for call:', call._id, 'responderId:', call.responderId);
+      }
+      if (responder && !responder.profile?.name && !responder.phone) {
+        console.log('⚠️ Responder has no name or phone:', {
+          callId: call._id,
+          responderId: responder._id,
+          responderProfile: responder.profile,
+        });
+      }
 
       return {
         id: String(call._id),
-        userId: user._id ? String(user._id) : String(call.userId),
-        responderId: responder._id ? String(responder._id) : String(call.responderId),
+        userId: user?._id ? String(user._id) : String(call.userId),
+        responderId: responder?._id ? String(responder._id) : String(call.responderId),
         user: {
-          id: user._id ? String(user._id) : String(call.userId),
-          name: user.profile?.name || user.phone || 'Unknown User',
-          phone: user.phone || '',
-          profile: user.profile || {},
+          id: user?._id ? String(user._id) : String(call.userId),
+          name: userName,
+          phone: user?.phone || '',
+          profile: user?.profile || {},
         },
         responder: {
-          id: responder._id ? String(responder._id) : String(call.responderId),
-          name: responder.profile?.name || responder.phone || 'Unknown Responder',
-          phone: responder.phone || '',
-          profile: responder.profile || {},
+          id: responder?._id ? String(responder._id) : String(call.responderId),
+          name: responderName,
+          phone: responder?.phone || '',
+          profile: responder?.profile || {},
         },
         type: call.type,
         status: call.status,

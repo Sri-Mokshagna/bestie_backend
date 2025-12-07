@@ -38,7 +38,7 @@ export const blockUser = async (req: Request, res: Response) => {
     }
 };
 
-export const un blockUser = async (req: Request, res: Response) => {
+export const unblockUser = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.id;
         const { unblockedUserId } = req.body;
