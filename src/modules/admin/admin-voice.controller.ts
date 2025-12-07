@@ -8,7 +8,7 @@ export const getRespondersWithVoiceRecordings = async (req: Request, res: Respon
 
         const responders = await User.find({
             role: UserRole.RESPONDER,
-            'profile.voiceBlob': { $exists: true, $ne: null, $ne: '' }
+            'profile.voiceBlob': { $exists: true, $nin: [null, ''] }
         })
             .select('profile phone createdAt')
             .sort({ createdAt: -1 })
@@ -17,7 +17,7 @@ export const getRespondersWithVoiceRecordings = async (req: Request, res: Respon
 
         const total = await User.countDocuments({
             role: UserRole.RESPONDER,
-            'profile.voiceBlob': { $exists: true, $ne: null, $ne: '' }
+            'profile.voiceBlob': { $exists: true, $nin: [null, ''] }
         });
 
         res.json({
