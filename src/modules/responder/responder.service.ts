@@ -156,4 +156,53 @@ export const responderService = {
       message: 'Availability settings updated successfully',
     };
   },
+
+  async getMyProfile(responderId: string) {
+    const user = await User.findById(responderId).select('-password').lean();
+
+    if (!user) {
+      throw new AppError(404, 'Responder not found');
+    }
+
+    if (user.role !== UserRole.RESPONDER) {
+      throw new AppError(400, 'User is not a responder');
+    }
+
+    return {
+      id: (user._id as any).toString(),
+      audioEnabled: user.audioEnabled !== undefined ? user.audioEnabled : false,
+      videoEnabled: user.videoEnabled !== undefined ? user.videoEnabled : false,
+      chatEnabled: user.chatEnabled !== undefined ? user.chatEnabled : false,
+      isOnline: user.isOnline || false,
+      inCall: user.inCall || false,
+      coinBalance: user.coinBalance,
+      profile: user.profile,
+    };
+  },
+
+  async disableAllAvailability(responderId: string) {
+    const user = await User.findById(responderId);
+
+    if (!user) {
+      throw new AppError(404, 'Responder not found');
+    }
+
+    if (user.role !== UserRole.RESPONDER) {
+      throw new AppError(400, 'User is not a responder');
+    }
+
+    // Disable all availability options
+    user.audioEnabled = false;
+    user.videoEnabled = false;
+    user.chatEnabled = false;
+    await user.save();
+
+    return {
+      success: true,
+      audioEnabled: false,
+      videoEnabled: false,
+      chatEnabled: false,
+      message: 'All availability options disabled',
+    };
+  },
 };

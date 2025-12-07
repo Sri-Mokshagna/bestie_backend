@@ -65,4 +65,26 @@ export const responderController = {
 
     res.json(result);
   },
+
+  async getMyProfile(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const profile = await responderService.getMyProfile(req.user.id);
+
+    res.json(profile);
+  },
+
+  async disableAllAvailability(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const result = await responderService.disableAllAvailability(req.user.id);
+
+    res.json(result);
+  },
 };

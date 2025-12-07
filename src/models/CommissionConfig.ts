@@ -17,14 +17,14 @@ const commissionConfigSchema = new Schema<ICommissionConfig>(
       required: true,
       min: 0,
       max: 100,
-      default: 50,
+      default: 60,
     },
     adminCommissionPercentage: {
       type: Number,
       required: true,
       min: 0,
       max: 100,
-      default: 50,
+      default: 40,
     },
     coinToINRRate: {
       type: Number,
