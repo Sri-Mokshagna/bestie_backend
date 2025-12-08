@@ -8,16 +8,16 @@ const router = Router();
  * This endpoint receives the redirect from Cashfree and redirects to the mobile app deep link
  */
 router.get('/success', (req: Request, res: Response) => {
-    try {
-        const { orderId } = req.query;
+  try {
+    const { orderId } = req.query;
 
-        logger.info({ orderId }, 'Payment redirect - success');
+    logger.info({ orderId }, 'Payment redirect - success');
 
-        // Redirect to mobile app deep link
-        const deepLink = `bestie://payment/success?orderId=${orderId || ''}`;
+    // Redirect to mobile app deep link
+    const deepLink = `bestie://payment/success?orderId=${orderId || ''}`;
 
-        // Send HTML that redirects to deep link and shows a fallback message
-        res.send(`
+    // Send HTML that redirects to deep link and shows a fallback message
+    res.send(`
       <!DOCTYPE html>
       <html>
         <head>
@@ -66,6 +66,17 @@ router.get('/success', (req: Request, res: Response) => {
             .button:hover {
               transform: scale(1.05);
             }
+            .footer {
+              position: fixed;
+              bottom: 0;
+              left: 0;
+              right: 0;
+              padding: 1rem;
+              text-align: center;
+              font-size: 0.75rem;
+              opacity: 0.8;
+              background: rgba(0, 0, 0, 0.1);
+            }
           </style>
         </head>
         <body>
@@ -76,6 +87,9 @@ router.get('/success', (req: Request, res: Response) => {
             <p>Redirecting to app...</p>
             <a href="${deepLink}" class="button">Open Bestie App</a>
           </div>
+          <div class="footer">
+            &copy; 2025 Varshith Vegetables and Fruits Private Limited. All rights reserved.
+          </div>
           <script>
             // Attempt automatic redirect
             setTimeout(() => {
@@ -85,22 +99,22 @@ router.get('/success', (req: Request, res: Response) => {
         </body>
       </html>
     `);
-    } catch (error) {
-        logger.error({ error }, 'Error in payment success redirect');
-        res.status(500).send('Error processing payment redirect');
-    }
+  } catch (error) {
+    logger.error({ error }, 'Error in payment success redirect');
+    res.status(500).send('Error processing payment redirect');
+  }
 });
 
 router.get('/failure', (req: Request, res: Response) => {
-    try {
-        const { orderId } = req.query;
+  try {
+    const { orderId } = req.query;
 
-        logger.info({ orderId }, 'Payment redirect - failure');
+    logger.info({ orderId }, 'Payment redirect - failure');
 
-        // Redirect to mobile app deep link
-        const deepLink = `bestie://payment/failure?orderId=${orderId || ''}`;
+    // Redirect to mobile app deep link
+    const deepLink = `bestie://payment/failure?orderId=${orderId || ''}`;
 
-        res.send(`
+    res.send(`
       <!DOCTYPE html>
       <html>
         <head>
@@ -149,6 +163,17 @@ router.get('/failure', (req: Request, res: Response) => {
             .button:hover {
               transform: scale(1.05);
             }
+            .footer {
+              position: fixed;
+              bottom: 0;
+              left: 0;
+              right: 0;
+              padding: 1rem;
+              text-align: center;
+              font-size: 0.75rem;
+              opacity: 0.8;
+              background: rgba(0, 0, 0, 0.1);
+            }
           </style>
         </head>
         <body>
@@ -159,6 +184,9 @@ router.get('/failure', (req: Request, res: Response) => {
             <p>Redirecting to app...</p>
             <a href="${deepLink}" class="button">Open Bestie App</a>
           </div>
+          <div class="footer">
+            &copy; 2025 Varshith Vegetables and Fruits Private Limited. All rights reserved.
+          </div>
           <script>
             // Attempt automatic redirect
             setTimeout(() => {
@@ -168,10 +196,10 @@ router.get('/failure', (req: Request, res: Response) => {
         </body>
       </html>
     `);
-    } catch (error) {
-        logger.error({ error }, 'Error in payment failure redirect');
-        res.status(500).send('Error processing payment redirect');
-    }
+  } catch (error) {
+    logger.error({ error }, 'Error in payment failure redirect');
+    res.status(500).send('Error processing payment redirect');
+  }
 });
 
 export default router;
