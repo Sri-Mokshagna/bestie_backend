@@ -4,6 +4,7 @@ import { UserRole } from '../../models/User';
 import * as adminController from './admin.controller';
 import * as adminVoiceController from './admin-voice.controller';
 import * as reportsController from './reports.controller';
+import * as payoutController from '../responder/payout.controller';
 
 const router = Router();
 
@@ -36,5 +37,9 @@ router.get('/analytics/revenue', adminController.getRevenueAnalytics);
 // Commission settings
 router.get('/commission', adminController.getCommissionSettings);
 router.put('/commission', adminController.updateCommissionSettings);
+
+// Payout management
+router.get('/payouts', payoutController.getAllPayouts);
+router.put('/payouts/:payoutId/process', payoutController.processPayout);
 
 export default router;
