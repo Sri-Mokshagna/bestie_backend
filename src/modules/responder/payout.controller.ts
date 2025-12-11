@@ -32,6 +32,7 @@ export const getEarnings = asyncHandler(async (req: AuthRequest, res: Response) 
       pendingCoins: responder.earnings.pendingCoins,
       redeemedCoins: responder.earnings.redeemedCoins,
     },
+    upiId: responder.upiId,
     redemption: {
       canRedeem: redemptionInfo.canRedeem,
       minRequired: redemptionInfo.minRequired,
@@ -67,7 +68,10 @@ export const getPayoutHistory = asyncHandler(async (req: AuthRequest, res: Respo
       id: p._id,
       coins: p.coins,
       amountINR: p.amountINR,
+      upiId: p.upiId,
       status: p.status,
+      rejectionReason: p.rejectionReason,
+      rejectedAt: p.rejectedAt,
       createdAt: p.createdAt,
       completedAt: p.completedAt,
     })),
@@ -85,18 +89,44 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
     throw new AppError(401, 'Not authenticated');
   }
 
+  const { upiId, amount } = req.body;
+
+  if (!upiId || !amount) {
+    throw new AppError(400, 'UPI ID and amount are required');
+  }
+
+  // Validate UPI ID format
+  const upiRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$/;
+  if (!upiRegex.test(upiId)) {
+    throw new AppError(400, 'Invalid UPI ID format');
+  }
+
   const responder = await Responder.findOne({ userId: req.user.id });
   if (!responder) {
     throw new AppError(404, 'Responder profile not found');
   }
 
-  // Check if responder can redeem
+  // Check if responder has minimum required coins
   const redemptionInfo = await coinService.canRedeem(req.user.id);
   if (!redemptionInfo.canRedeem) {
     throw new AppError(
       400,
       `Minimum ${redemptionInfo.minRequired} coins required for redemption. You have ${redemptionInfo.pendingCoins} coins.`,
       'INSUFFICIENT_COINS'
+    );
+  }
+
+  // Validate amount
+  const coinsToRedeem = parseInt(amount);
+  if (isNaN(coinsToRedeem) || coinsToRedeem < 1) {
+    throw new AppError(400, 'Amount must be at least 1 coin');
+  }
+
+  if (coinsToRedeem > responder.earnings.pendingCoins) {
+    throw new AppError(
+      400,
+      `Amount must be less than or equal to your available balance (${responder.earnings.pendingCoins} coins)`,
+      'AMOUNT_EXCEEDS_BALANCE'
     );
   }
 
@@ -110,18 +140,21 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
     throw new AppError(400, 'You already have a pending payout request', 'PAYOUT_PENDING');
   }
 
-  // Check if bank details are set
-  if (!responder.bankDetails) {
-    throw new AppError(400, 'Please add bank details before requesting payout', 'BANK_DETAILS_MISSING');
-  }
-
-  const coinsToRedeem = responder.earnings.pendingCoins;
   const amountINR = await coinService.calculateRedemptionAmount(coinsToRedeem);
 
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
+    // Save UPI ID to responder profile for future use
+    if (responder.upiId !== upiId) {
+      await Responder.findByIdAndUpdate(
+        responder._id,
+        { upiId: upiId.trim() },
+        { session }
+      );
+    }
+
     // Create payout request
     const payout = await Payout.create(
       [
@@ -129,13 +162,14 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
           responderId: responder._id,
           coins: coinsToRedeem,
           amountINR,
+          upiId: upiId.trim(),
           status: PayoutStatus.PENDING,
         },
       ],
       { session }
     );
 
-    // Move coins from pending to redeemed (will be reverted if payout fails)
+    // Move coins from pending to redeemed (will be reverted if payout is rejected)
     await Responder.findByIdAndUpdate(
       responder._id,
       {
@@ -155,6 +189,7 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
         id: payout[0]._id,
         coins: payout[0].coins,
         amountINR: payout[0].amountINR,
+        upiId: payout[0].upiId,
         status: payout[0].status,
         createdAt: payout[0].createdAt,
       },
@@ -175,8 +210,8 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
   const { payoutId } = req.params;
   const { status, gatewayResponse } = req.body;
 
-  if (!['completed', 'failed'].includes(status)) {
-    throw new AppError(400, 'Invalid status. Must be completed or failed');
+  if (!['completed', 'failed', 'rejected'].includes(status)) {
+    throw new AppError(400, 'Invalid status. Must be completed, failed, or rejected');
   }
 
   const payout = await Payout.findById(payoutId);
@@ -198,6 +233,24 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
       payout.completedAt = new Date();
       payout.gatewayResponse = gatewayResponse;
       await payout.save({ session });
+    } else if (status === 'rejected') {
+      // Payout rejected, revert coins
+      payout.status = PayoutStatus.REJECTED;
+      payout.rejectedAt = new Date();
+      payout.rejectionReason = req.body.rejectionReason || 'Rejected by admin';
+      await payout.save({ session });
+
+      // Move coins back to pending
+      await Responder.findByIdAndUpdate(
+        payout.responderId,
+        {
+          $inc: {
+            'earnings.pendingCoins': payout.coins,
+            'earnings.redeemedCoins': -payout.coins,
+          },
+        },
+        { session }
+      );
     } else {
       // Payout failed, revert coins
       payout.status = PayoutStatus.FAILED;
@@ -225,7 +278,9 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
         id: payout._id,
         coins: payout.coins,
         amountINR: payout.amountINR,
+        upiId: payout.upiId,
         status: payout.status,
+        rejectionReason: payout.rejectionReason,
         completedAt: payout.completedAt,
       },
     });
@@ -252,7 +307,14 @@ export const getAllPayouts = asyncHandler(async (req: AuthRequest, res: Response
   }
 
   const payouts = await Payout.find(query)
-    .populate('responderId', 'userId earnings')
+    .populate({
+      path: 'responderId',
+      select: 'userId earnings',
+      populate: {
+        path: 'userId',
+        select: 'profile phone',
+      },
+    })
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
@@ -264,10 +326,15 @@ export const getAllPayouts = asyncHandler(async (req: AuthRequest, res: Response
     payouts: payouts.map((p: any) => ({
       id: p._id,
       responderId: p.responderId._id,
-      responderUserId: p.responderId.userId,
+      responderUserId: p.responderId.userId?._id,
+      responderName: p.responderId.userId?.profile?.name || 'Unknown',
+      responderPhone: p.responderId.userId?.phone,
       coins: p.coins,
       amountINR: p.amountINR,
+      upiId: p.upiId,
       status: p.status,
+      rejectionReason: p.rejectionReason,
+      rejectedAt: p.rejectedAt,
       createdAt: p.createdAt,
       completedAt: p.completedAt,
     })),
