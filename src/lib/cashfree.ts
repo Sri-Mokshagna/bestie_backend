@@ -9,8 +9,17 @@ interface CashfreeConfig {
   webhookSecret: string;
 }
 
+interface CashfreePayoutConfig {
+  clientId: string;
+  clientSecret: string;
+  baseUrl: string;
+}
+
 class CashfreeService {
   private config: CashfreeConfig | null = null;
+  private payoutConfig: CashfreePayoutConfig | null = null;
+  private payoutToken: string | null = null;
+  private payoutTokenExpiry: number = 0;
 
   private initializeConfig() {
     if (!this.config) {
@@ -30,6 +39,23 @@ class CashfreeService {
     return this.config;
   }
 
+  private initializePayoutConfig() {
+    if (!this.payoutConfig) {
+      this.payoutConfig = {
+        clientId: process.env.CASHFREE_PAYOUT_CLIENT_ID!,
+        clientSecret: process.env.CASHFREE_PAYOUT_CLIENT_SECRET!,
+        baseUrl: process.env.NODE_ENV === 'production'
+          ? 'https://payout-api.cashfree.com/payout/v1'
+          : 'https://payout-gamma.cashfree.com/payout/v1',
+      };
+
+      if (!this.payoutConfig.clientId || !this.payoutConfig.clientSecret) {
+        throw new Error('Cashfree Payout credentials not configured');
+      }
+    }
+    return this.payoutConfig;
+  }
+
   private getHeaders() {
     const config = this.initializeConfig();
     return {
@@ -37,6 +63,49 @@ class CashfreeService {
       'x-api-version': '2023-08-01',
       'x-client-id': config.appId,
       'x-client-secret': config.secretKey,
+    };
+  }
+
+  private async getPayoutToken(): Promise<string> {
+    // Return cached token if still valid
+    if (this.payoutToken && Date.now() < this.payoutTokenExpiry) {
+      return this.payoutToken;
+    }
+
+    try {
+      const config = this.initializePayoutConfig();
+      const response = await axios.post(
+        `${config.baseUrl}/authorize`,
+        {
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      this.payoutToken = response.data.data.token;
+      // Token expires in 5 minutes, refresh after 4 minutes
+      this.payoutTokenExpiry = Date.now() + 4 * 60 * 1000;
+
+      logger.info('Cashfree Payout token obtained');
+      return this.payoutToken;
+    } catch (error: any) {
+      logger.error({
+        error: error.response?.data || error.message,
+      }, 'Failed to get Cashfree Payout token');
+      throw error;
+    }
+  }
+
+  private async getPayoutHeaders() {
+    const token = await this.getPayoutToken();
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
     };
   }
 
@@ -185,6 +254,117 @@ class CashfreeService {
       return response.data;
     } catch (error) {
       logger.error({ error, orderId, refundId }, 'Failed to initiate refund');
+      throw error;
+    }
+  }
+
+  /**
+   * Payout API Methods
+   */
+
+  async createBeneficiary(data: {
+    beneId: string;
+    name: string;
+    email: string;
+    phone: string;
+    vpa: string; // UPI ID
+  }) {
+    try {
+      const config = this.initializePayoutConfig();
+      const headers = await this.getPayoutHeaders();
+
+      const payload = {
+        beneId: data.beneId,
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        bankAccount: null,
+        vpa: data.vpa,
+      };
+
+      const response = await axios.post(
+        `${config.baseUrl}/addBeneficiary`,
+        payload,
+        { headers }
+      );
+
+      logger.info({ beneId: data.beneId }, 'Beneficiary created successfully');
+      return response.data;
+    } catch (error: any) {
+      // If beneficiary already exists, that's okay
+      if (error.response?.data?.subCode === 'BENEFICIARY_ALREADY_EXISTS') {
+        logger.info({ beneId: data.beneId }, 'Beneficiary already exists');
+        return { status: 'SUCCESS', message: 'Beneficiary already exists' };
+      }
+
+      logger.error({
+        error: error.response?.data || error.message,
+        beneId: data.beneId,
+      }, 'Failed to create beneficiary');
+      throw error;
+    }
+  }
+
+  async requestPayout(data: {
+    transferId: string;
+    beneId: string;
+    amount: number;
+    transferMode?: string;
+    remarks?: string;
+  }) {
+    try {
+      const config = this.initializePayoutConfig();
+      const headers = await this.getPayoutHeaders();
+
+      const payload = {
+        beneId: data.beneId,
+        amount: data.amount.toString(),
+        transferId: data.transferId,
+        transferMode: data.transferMode || 'upi',
+        remarks: data.remarks || 'Payout from Bestie',
+      };
+
+      const response = await axios.post(
+        `${config.baseUrl}/requestTransfer`,
+        payload,
+        { headers }
+      );
+
+      logger.info({
+        transferId: data.transferId,
+        amount: data.amount,
+      }, 'Payout requested successfully');
+
+      return response.data;
+    } catch (error: any) {
+      logger.error({
+        error: error.response?.data || error.message,
+        transferId: data.transferId,
+      }, 'Failed to request payout');
+      throw error;
+    }
+  }
+
+  async getPayoutStatus(transferId: string) {
+    try {
+      const config = this.initializePayoutConfig();
+      const headers = await this.getPayoutHeaders();
+
+      const response = await axios.get(
+        `${config.baseUrl}/getTransferStatus`,
+        {
+          headers,
+          params: { transferId },
+        }
+      );
+
+      logger.info({ transferId }, 'Payout status retrieved');
+      return response.data;
+    } catch (error: any) {
+      logger.error({
+        error: error.response?.data || error.message,
+        transferId,
+      }, 'Failed to get payout status');
       throw error;
     }
   }

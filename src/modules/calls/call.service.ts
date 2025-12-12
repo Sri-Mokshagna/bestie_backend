@@ -462,7 +462,14 @@ export const callService = {
 
     if (call.status === CallStatus.ENDED) {
       logger.warn({ callId, userId, status: call.status }, '⚠️ Call already ended');
-      throw new AppError(400, 'Call already ended');
+      // Don't throw error, just emit events to ensure both clients are notified
+      emitToUser(call.userId.toString(), 'call_ended', {
+        callId: String(call._id),
+      });
+      emitToUser(call.responderId.toString(), 'call_ended', {
+        callId: String(call._id),
+      });
+      return call;
     }
 
     logger.info({
@@ -482,7 +489,12 @@ export const callService = {
     }
 
     // Calculate actual duration and deduct coins
-    await this.endCallAndDeductCoins(call);
+    try {
+      await this.endCallAndDeductCoins(call);
+    } catch (error: any) {
+      logger.error({ error: error.message, callId: String(call._id) }, 'Error in endCallAndDeductCoins, but continuing to emit events');
+      // Continue to emit events even if coin deduction fails
+    }
 
     logger.info({
       callId: String(call._id),
@@ -491,12 +503,18 @@ export const callService = {
     }, '📤 Emitting call_ended events to both parties');
 
     // Emit socket event to both parties that call has ended
-    emitToUser(call.userId.toString(), 'call_ended', {
-      callId: String(call._id),
-    });
-    emitToUser(call.responderId.toString(), 'call_ended', {
-      callId: String(call._id),
-    });
+    // This is critical - ensure it happens even if database operations fail
+    try {
+      emitToUser(call.userId.toString(), 'call_ended', {
+        callId: String(call._id),
+      });
+      emitToUser(call.responderId.toString(), 'call_ended', {
+        callId: String(call._id),
+      });
+      logger.info({ callId: String(call._id) }, '✅ Call ended events emitted successfully');
+    } catch (error: any) {
+      logger.error({ error: error.message, callId: String(call._id) }, '❌ Failed to emit call_ended events');
+    }
 
     logger.info({ callId: String(call._id) }, '✅ Call ended successfully');
 

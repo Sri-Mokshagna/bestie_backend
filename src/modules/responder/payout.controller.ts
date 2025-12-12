@@ -6,6 +6,7 @@ import { coinService } from '../../services/coinService';
 import { AppError } from '../../middleware/errorHandler';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { mongoose } from '../../lib/db';
+import { cashfreeService } from '../../lib/cashfree';
 
 /**
  * Responder Payout/Redemption Controller
@@ -208,13 +209,21 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
  */
 export const processPayout = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { payoutId } = req.params;
-  const { status, gatewayResponse } = req.body;
+  const { status, rejectionReason } = req.body;
 
-  if (!['completed', 'failed', 'rejected'].includes(status)) {
-    throw new AppError(400, 'Invalid status. Must be completed, failed, or rejected');
+  if (!['completed', 'rejected'].includes(status)) {
+    throw new AppError(400, 'Invalid status. Must be completed or rejected');
   }
 
-  const payout = await Payout.findById(payoutId);
+  const payout = await Payout.findById(payoutId).populate({
+    path: 'responderId',
+    select: 'userId',
+    populate: {
+      path: 'userId',
+      select: 'profile phone email',
+    },
+  });
+
   if (!payout) {
     throw new AppError(404, 'Payout not found');
   }
@@ -228,16 +237,89 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
 
   try {
     if (status === 'completed') {
-      // Mark payout as completed
-      payout.status = PayoutStatus.COMPLETED;
-      payout.completedAt = new Date();
-      payout.gatewayResponse = gatewayResponse;
+      // Update status to processing
+      payout.status = PayoutStatus.PROCESSING;
       await payout.save({ session });
+
+      // Get responder details
+      const responder: any = payout.responderId;
+      const user: any = responder.userId;
+
+      // Create beneficiary ID (unique per responder)
+      const beneId = `BENE_${responder._id}`;
+      const transferId = `TRANSFER_${payout._id}`;
+
+      try {
+        // Step 1: Create/Register beneficiary with Cashfree
+        await cashfreeService.createBeneficiary({
+          beneId,
+          name: user.profile?.name || 'Responder',
+          email: user.email || `responder${responder._id}@bestie.app`,
+          phone: user.phone,
+          vpa: payout.upiId,
+        });
+
+        // Step 2: Request payout transfer
+        const payoutResponse = await cashfreeService.requestPayout({
+          transferId,
+          beneId,
+          amount: payout.amountINR,
+          transferMode: 'upi',
+          remarks: `Payout for ${payout.coins} coins`,
+        });
+
+        // Step 3: Update payout with gateway response
+        payout.status = PayoutStatus.COMPLETED;
+        payout.completedAt = new Date();
+        payout.gatewayResponse = payoutResponse;
+        await payout.save({ session });
+
+        await session.commitTransaction();
+
+        res.json({
+          message: 'Payout processed successfully',
+          payout: {
+            id: payout._id,
+            coins: payout.coins,
+            amountINR: payout.amountINR,
+            upiId: payout.upiId,
+            status: payout.status,
+            completedAt: payout.completedAt,
+          },
+        });
+        return;
+      } catch (cashfreeError: any) {
+        // If Cashfree API fails, mark payout as failed and revert coins
+        payout.status = PayoutStatus.FAILED;
+        payout.gatewayResponse = {
+          error: cashfreeError.response?.data || cashfreeError.message,
+        };
+        await payout.save({ session });
+
+        // Move coins back to pending
+        await Responder.findByIdAndUpdate(
+          payout.responderId,
+          {
+            $inc: {
+              'earnings.pendingCoins': payout.coins,
+              'earnings.redeemedCoins': -payout.coins,
+            },
+          },
+          { session }
+        );
+
+        await session.commitTransaction();
+
+        throw new AppError(
+          500,
+          `Payout failed: ${cashfreeError.response?.data?.message || cashfreeError.message}`
+        );
+      }
     } else if (status === 'rejected') {
       // Payout rejected, revert coins
       payout.status = PayoutStatus.REJECTED;
       payout.rejectedAt = new Date();
-      payout.rejectionReason = req.body.rejectionReason || 'Rejected by admin';
+      payout.rejectionReason = rejectionReason || 'Rejected by admin';
       await payout.save({ session });
 
       // Move coins back to pending
@@ -251,39 +333,25 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
         },
         { session }
       );
-    } else {
-      // Payout failed, revert coins
-      payout.status = PayoutStatus.FAILED;
-      payout.gatewayResponse = gatewayResponse;
-      await payout.save({ session });
 
-      // Move coins back to pending
-      await Responder.findByIdAndUpdate(
-        payout.responderId,
-        {
-          $inc: {
-            'earnings.pendingCoins': payout.coins,
-            'earnings.redeemedCoins': -payout.coins,
-          },
+      await session.commitTransaction();
+
+      res.json({
+        message: 'Payout rejected successfully',
+        payout: {
+          id: payout._id,
+          coins: payout.coins,
+          amountINR: payout.amountINR,
+          upiId: payout.upiId,
+          status: payout.status,
+          rejectionReason: payout.rejectionReason,
+          rejectedAt: payout.rejectedAt,
         },
-        { session }
-      );
+      });
+      return;
     }
 
-    await session.commitTransaction();
 
-    res.json({
-      message: `Payout ${status} successfully`,
-      payout: {
-        id: payout._id,
-        coins: payout.coins,
-        amountINR: payout.amountINR,
-        upiId: payout.upiId,
-        status: payout.status,
-        rejectionReason: payout.rejectionReason,
-        completedAt: payout.completedAt,
-      },
-    });
   } catch (error) {
     await session.abortTransaction();
     throw error;
