@@ -80,15 +80,15 @@ class CashfreeService {
         clientIdPrefix: config.clientId?.substring(0, 10),
       }, 'Requesting Cashfree Payout token');
 
+      // Cashfree Payout API expects credentials in headers
       const response = await axios.post(
         `${config.baseUrl}/authorize`,
-        {
-          clientId: config.clientId,
-          clientSecret: config.clientSecret,
-        },
+        {},
         {
           headers: {
             'Content-Type': 'application/json',
+            'X-Client-Id': config.clientId,
+            'X-Client-Secret': config.clientSecret,
           },
         }
       );
