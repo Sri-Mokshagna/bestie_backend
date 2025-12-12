@@ -309,6 +309,7 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
         );
 
         await session.commitTransaction();
+        session.endSession();
 
         throw new AppError(
           500,

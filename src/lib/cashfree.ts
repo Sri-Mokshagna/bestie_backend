@@ -74,6 +74,12 @@ class CashfreeService {
 
     try {
       const config = this.initializePayoutConfig();
+
+      logger.info({
+        baseUrl: config.baseUrl,
+        clientIdPrefix: config.clientId?.substring(0, 10),
+      }, 'Requesting Cashfree Payout token');
+
       const response = await axios.post(
         `${config.baseUrl}/authorize`,
         {
@@ -87,16 +93,37 @@ class CashfreeService {
         }
       );
 
-      this.payoutToken = response.data.data.token;
+      logger.info({
+        responseStatus: response.status,
+        responseData: response.data,
+      }, 'Cashfree Payout API response');
+
+      // Handle different response structures
+      const token = response.data?.data?.token || response.data?.token;
+
+      if (!token) {
+        throw new Error(`Invalid token response structure: ${JSON.stringify(response.data)}`);
+      }
+
+      this.payoutToken = token;
       // Token expires in 5 minutes, refresh after 4 minutes
       this.payoutTokenExpiry = Date.now() + 4 * 60 * 1000;
 
-      logger.info('Cashfree Payout token obtained');
+      logger.info('Cashfree Payout token obtained successfully');
       return this.payoutToken;
     } catch (error: any) {
       logger.error({
         error: error.response?.data || error.message,
+        statusCode: error.response?.status,
       }, 'Failed to get Cashfree Payout token');
+
+      // Provide helpful error message if credentials are not configured
+      if (error.message?.includes('not configured')) {
+        throw new Error(
+          'Cashfree Payout credentials not configured. Please add CASHFREE_PAYOUT_CLIENT_ID and CASHFREE_PAYOUT_CLIENT_SECRET to environment variables.'
+        );
+      }
+
       throw error;
     }
   }
