@@ -41,17 +41,31 @@ class CashfreeService {
 
   private initializePayoutConfig() {
     if (!this.payoutConfig) {
-      this.payoutConfig = {
-        clientId: process.env.CASHFREE_PAYOUT_CLIENT_ID!,
-        clientSecret: process.env.CASHFREE_PAYOUT_CLIENT_SECRET!,
-        baseUrl: process.env.NODE_ENV === 'production'
-          ? 'https://payout-api.cashfree.com/payout/v1'
-          : 'https://payout-gamma.cashfree.com/payout/v1',
-      };
+      const clientId = process.env.CASHFREE_PAYOUT_CLIENT_ID!;
+      const clientSecret = process.env.CASHFREE_PAYOUT_CLIENT_SECRET!;
 
-      if (!this.payoutConfig.clientId || !this.payoutConfig.clientSecret) {
+      if (!clientId || !clientSecret) {
         throw new Error('Cashfree Payout credentials not configured');
       }
+
+      // Determine environment based on credentials
+      // Test credentials start with 'CF' followed by alphanumeric
+      // Production credentials have different format
+      const isTestMode = clientSecret.includes('_test_') || clientId.startsWith('CF');
+
+      this.payoutConfig = {
+        clientId,
+        clientSecret,
+        // Use sandbox for test credentials, production for live credentials
+        baseUrl: isTestMode
+          ? 'https://payout-gamma.cashfree.com/payout/v1'
+          : 'https://payout-api.cashfree.com/payout/v1',
+      };
+
+      logger.info({
+        environment: isTestMode ? 'TEST/SANDBOX' : 'PRODUCTION',
+        baseUrl: this.payoutConfig.baseUrl,
+      }, 'Cashfree Payout environment detected');
     }
     return this.payoutConfig;
   }
