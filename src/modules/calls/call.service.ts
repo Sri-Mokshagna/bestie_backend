@@ -562,10 +562,9 @@ export const callService = {
   },
 
   async getCallHistory(userId: string) {
-    // Find all calls where user was involved (as user or responder)
     const calls = await Call.find({
       $or: [
-        { userId: userId },
+        { userId },
         { responderId: userId },
       ],
       status: { $in: [CallStatus.ENDED, CallStatus.REJECTED, CallStatus.MISSED] },
@@ -584,43 +583,62 @@ export const callService = {
       .limit(50)
       .lean();
 
+    logger.info({
+      userId,
+      callCount: calls.length,
+      sampleCall: calls[0] ? {
+        id: calls[0]._id,
+        userIdType: typeof calls[0].userId,
+        responderIdType: typeof calls[0].responderId,
+        userIdValue: calls[0].userId,
+        responderIdValue: calls[0].responderId,
+      } : null
+    }, 'Call history retrieved');
+
     // Format calls with populated user data
     return calls.map(call => {
-      // Handle user data
+      // Handle user data - check if populated or just an ID
       const userDoc = call.userId as any;
-      const user = userDoc?._id ? {
-        _id: userDoc._id,
-        profile: userDoc.profile || {},
-        phone: userDoc.phone || '',
-        role: userDoc.role
-      } : null;
+      let user = null;
+      let userName = 'User';
 
-      // Handle responder data
+      if (userDoc) {
+        if (typeof userDoc === 'object' && userDoc._id) {
+          // Successfully populated
+          user = {
+            _id: userDoc._id,
+            profile: userDoc.profile || {},
+            phone: userDoc.phone || '',
+            role: userDoc.role
+          };
+          userName = user.profile?.name || user.phone || 'User';
+        } else {
+          // Not populated, just an ID
+          logger.warn({ callId: call._id, userId: userDoc }, 'User not populated in call history');
+          userName = `User ${String(userDoc).slice(-4)}`;
+        }
+      }
+
+      // Handle responder data - check if populated or just an ID
       const responderDoc = call.responderId as any;
-      const responder = responderDoc?._id ? {
-        _id: responderDoc._id,
-        profile: responderDoc.profile || {},
-        phone: responderDoc.phone || '',
-        role: responderDoc.role
-      } : null;
+      let responder = null;
+      let responderName = 'Responder';
 
-      // Extract names with multiple fallback options
-      const userName = user?.profile?.name || user?.phone || 'User';
-      const responderName = responder?.profile?.name || responder?.phone || `Responder ${String(call.responderId).slice(-4)}`;
-
-      // Debug logging for missing names
-      if (!user) {
-        console.log('⚠️ User not found for call:', call._id, 'userId:', call.userId);
-      }
-      if (!responder) {
-        console.log('⚠️ Responder not found for call:', call._id, 'responderId:', call.responderId);
-      }
-      if (responder && !responder.profile?.name && !responder.phone) {
-        console.log('⚠️ Responder has no name or phone:', {
-          callId: call._id,
-          responderId: responder._id,
-          responderProfile: responder.profile,
-        });
+      if (responderDoc) {
+        if (typeof responderDoc === 'object' && responderDoc._id) {
+          // Successfully populated
+          responder = {
+            _id: responderDoc._id,
+            profile: responderDoc.profile || {},
+            phone: responderDoc.phone || '',
+            role: responderDoc.role
+          };
+          responderName = responder.profile?.name || responder.phone || `Responder ${String(responderDoc._id).slice(-4)}`;
+        } else {
+          // Not populated, just an ID
+          logger.warn({ callId: call._id, responderId: responderDoc }, 'Responder not populated in call history');
+          responderName = `Responder ${String(responderDoc).slice(-4)}`;
+        }
       }
 
       return {
@@ -628,13 +646,13 @@ export const callService = {
         userId: user?._id ? String(user._id) : String(call.userId),
         responderId: responder?._id ? String(responder._id) : String(call.responderId),
         user: {
-          id: user?._id ? String(user._id) : String(call.userId),
+          id: user?._id ? String(user._id) : (call.userId ? String(call.userId) : null),
           name: userName,
           phone: user?.phone || '',
           profile: user?.profile || {},
         },
         responder: {
-          id: responder?._id ? String(responder._id) : String(call.responderId),
+          id: responder?._id ? String(responder._id) : (call.responderId ? String(call.responderId) : null),
           name: responderName,
           phone: responder?.phone || '',
           profile: responder?.profile || {},
