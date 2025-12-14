@@ -1,5 +1,6 @@
 import { User, UserRole, UserStatus } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
+import { Responder } from '../../models/Responder';
 
 export const responderService = {
   async getActiveResponders(onlineOnly?: boolean) {
@@ -142,11 +143,22 @@ export const responderService = {
       throw new AppError(400, 'User is not a responder');
     }
 
-    // Update availability settings
+    // Update availability settings in User model
     user.audioEnabled = audioEnabled;
     user.videoEnabled = videoEnabled;
     user.chatEnabled = chatEnabled;
     await user.save();
+
+    // Also sync to Responder model to keep both in sync
+    await Responder.findOneAndUpdate(
+      { userId: responderId },
+      {
+        audioEnabled,
+        videoEnabled,
+        chatEnabled,
+      },
+      { upsert: false } // Don't create if missing, lazy creation handles that
+    );
 
     return {
       success: true,
@@ -191,11 +203,22 @@ export const responderService = {
       throw new AppError(400, 'User is not a responder');
     }
 
-    // Disable all availability options
+    // Disable all availability options in User model
     user.audioEnabled = false;
     user.videoEnabled = false;
     user.chatEnabled = false;
     await user.save();
+
+    // Also sync to Responder model
+    await Responder.findOneAndUpdate(
+      { userId: responderId },
+      {
+        audioEnabled: false,
+        videoEnabled: false,
+        chatEnabled: false,
+      },
+      { upsert: false }
+    );
 
     return {
       success: true,

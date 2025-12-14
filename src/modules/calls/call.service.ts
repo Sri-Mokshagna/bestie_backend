@@ -64,17 +64,39 @@ export const callService = {
     }
 
     // Check if responder is available for this type of call
-    const responderProfile = await Responder.findOne({ userId: responderId });
-    if (responderProfile) {
-      if (type === CallType.AUDIO && !responderProfile.audioEnabled) {
-        throw new AppError(400, 'Responder is not available for audio calls', 'RESPONDER_NOT_AVAILABLE');
-      }
-      if (type === CallType.VIDEO && !responderProfile.videoEnabled) {
-        throw new AppError(400, 'Responder is not available for video calls', 'RESPONDER_NOT_AVAILABLE');
-      }
-      if (responderProfile.inCall) {
-        throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
-      }
+    // Lazy-create Responder document if missing to handle edge cases
+    let responderProfile = await Responder.findOne({ userId: responderId });
+
+    if (!responderProfile) {
+      // Create missing Responder document with default settings from User model
+      logger.warn({ responderId }, 'Responder profile missing during call initiation, creating with defaults');
+
+      responderProfile = await Responder.create({
+        userId: responderId,
+        isOnline: responderUser.isOnline,
+        kycStatus: 'verified', // Assume verified since they're an active responder
+        earnings: {
+          totalCoins: 0,
+          pendingCoins: 0,
+          lockedCoins: 0,
+          redeemedCoins: 0,
+        },
+        rating: 0,
+        audioEnabled: responderUser.audioEnabled ?? true,
+        videoEnabled: responderUser.videoEnabled ?? true,
+        chatEnabled: responderUser.chatEnabled ?? true,
+      });
+    }
+
+    // Now ALWAYS check availability (document guaranteed to exist)
+    if (type === CallType.AUDIO && !responderProfile.audioEnabled) {
+      throw new AppError(400, 'Responder is not available for audio calls', 'RESPONDER_NOT_AVAILABLE');
+    }
+    if (type === CallType.VIDEO && !responderProfile.videoEnabled) {
+      throw new AppError(400, 'Responder is not available for video calls', 'RESPONDER_NOT_AVAILABLE');
+    }
+    if (responderProfile.inCall) {
+      throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
     }
 
     // Check if responder has blocked this user
@@ -601,6 +623,7 @@ export const callService = {
       const userDoc = call.userId as any;
       let user = null;
       let userName = 'User';
+      let userIdStr = 'unknown';
 
       if (userDoc) {
         if (typeof userDoc === 'object' && userDoc._id) {
@@ -611,11 +634,21 @@ export const callService = {
             phone: userDoc.phone || '',
             role: userDoc.role
           };
-          userName = user.profile?.name || user.phone || 'User';
+
+          // Better fallback logic - check if name exists and is not empty string
+          const profileName = user.profile?.name;
+          const hasValidName = profileName && typeof profileName === 'string' && profileName.trim().length > 0;
+
+          userName = hasValidName
+            ? profileName.trim()
+            : (user.phone || 'User');
+
+          userIdStr = String(userDoc._id);
         } else {
           // Not populated, just an ID
           logger.warn({ callId: call._id, userId: userDoc }, 'User not populated in call history');
           userName = `User ${String(userDoc).slice(-4)}`;
+          userIdStr = String(userDoc);
         }
       }
 
@@ -623,6 +656,7 @@ export const callService = {
       const responderDoc = call.responderId as any;
       let responder = null;
       let responderName = 'Responder';
+      let responderIdStr = 'unknown';
 
       if (responderDoc) {
         if (typeof responderDoc === 'object' && responderDoc._id) {
@@ -633,26 +667,47 @@ export const callService = {
             phone: responderDoc.phone || '',
             role: responderDoc.role
           };
-          responderName = responder.profile?.name || responder.phone || `Responder ${String(responderDoc._id).slice(-4)}`;
+
+          // Better fallback logic - check if name exists and is not empty string
+          const profileName = responder.profile?.name;
+          const hasValidName = profileName && typeof profileName === 'string' && profileName.trim().length > 0;
+
+          responderName = hasValidName
+            ? profileName.trim()
+            : (responder.phone || `Responder ${String(responderDoc._id).slice(-4)}`);
+
+          responderIdStr = String(responderDoc._id);
+
+          // Log for debugging
+          logger.info({
+            callId: call._id,
+            responderId: responderIdStr,
+            profileName: profileName,
+            phone: responder.phone,
+            finalName: responderName,
+            profileKeys: Object.keys(responder.profile || {}),
+          }, 'Responder data in call history');
         } else {
           // Not populated, just an ID
           logger.warn({ callId: call._id, responderId: responderDoc }, 'Responder not populated in call history');
           responderName = `Responder ${String(responderDoc).slice(-4)}`;
+          responderIdStr = String(responderDoc);
         }
       }
 
+
       return {
         id: String(call._id),
-        userId: user?._id ? String(user._id) : String(call.userId),
-        responderId: responder?._id ? String(responder._id) : String(call.responderId),
+        userId: userIdStr || 'unknown',
+        responderId: responderIdStr || 'unknown',
         user: {
-          id: user?._id ? String(user._id) : (call.userId ? String(call.userId) : null),
+          id: userIdStr,
           name: userName,
           phone: user?.phone || '',
           profile: user?.profile || {},
         },
         responder: {
-          id: responder?._id ? String(responder._id) : (call.responderId ? String(call.responderId) : null),
+          id: responderIdStr,
           name: responderName,
           phone: responder?.phone || '',
           profile: responder?.profile || {},

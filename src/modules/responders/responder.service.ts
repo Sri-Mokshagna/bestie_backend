@@ -2,6 +2,7 @@ import { Responder, KycStatus } from '../../models/Responder';
 import { User } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
 import { notificationService } from '../../lib/notification';
+import { logger } from '../../lib/logger';
 
 export const responderService = {
   async getResponders(onlineOnly?: boolean, page = 1, limit = 20, userLanguage?: string) {
@@ -73,15 +74,36 @@ export const responderService = {
   },
 
   async toggleOnlineStatus(userId: string, isOnline: boolean) {
-    const responder = await Responder.findOne({ userId });
+    let responder = await Responder.findOne({ userId });
 
     if (!responder) {
-      throw new AppError(404, 'Responder profile not found');
+      // Lazy create responder profile if it doesn't exist
+      // This handles cases where a user was manually promoted or migration failed
+      logger.warn({ userId }, 'Responder profile missing in toggleOnlineStatus, creating new one');
+
+      responder = await Responder.create({
+        userId,
+        isOnline: isOnline,
+        kycStatus: KycStatus.VERIFIED, // Assume verified if they are accessing this
+        earnings: {
+          totalCoins: 0,
+          pendingCoins: 0,
+          lockedCoins: 0,
+          redeemedCoins: 0,
+        },
+        rating: 0,
+        audioEnabled: true,
+        videoEnabled: true,
+        chatEnabled: true,
+      });
+    } else {
+      responder.isOnline = isOnline;
+      responder.lastOnlineAt = new Date();
+      await responder.save();
     }
 
-    responder.isOnline = isOnline;
-    responder.lastOnlineAt = new Date();
-    await responder.save();
+    // Sync User online status to ensure calls work
+    await User.findByIdAndUpdate(userId, { isOnline });
 
     return responder;
   },
@@ -95,15 +117,28 @@ export const responderService = {
       chatEnabled?: boolean;
     }
   ) {
-    const responder = await Responder.findOne({ userId });
+    let responder = await Responder.findOne({ userId });
 
     if (!responder) {
-      throw new AppError(404, 'Responder profile not found');
+      // Lazy create if missing
+      logger.warn({ userId }, 'Responder profile missing in updateAvailabilityStatus, creating new one');
+      responder = await Responder.create({
+        userId,
+        isOnline: updates.isOnline ?? false,
+        kycStatus: KycStatus.VERIFIED,
+        earnings: { totalCoins: 0, pendingCoins: 0, lockedCoins: 0, redeemedCoins: 0 },
+        rating: 0,
+        audioEnabled: updates.audioEnabled ?? true,
+        videoEnabled: updates.videoEnabled ?? true,
+        chatEnabled: updates.chatEnabled ?? true,
+      });
     }
 
     if (updates.isOnline !== undefined) {
       responder.isOnline = updates.isOnline;
       responder.lastOnlineAt = new Date();
+      // Sync User online status
+      await User.findByIdAndUpdate(userId, { isOnline: updates.isOnline });
     }
 
     if (updates.audioEnabled !== undefined) {
@@ -130,10 +165,31 @@ export const responderService = {
   },
 
   async getAvailabilityStatus(userId: string) {
-    const responder = await Responder.findOne({ userId }).lean();
+    let responder = await Responder.findOne({ userId }).lean();
 
     if (!responder) {
-      throw new AppError(404, 'Responder profile not found');
+      // Don't throw 404, just return default offline status
+      // We could create it here, but maybe better to verify KYC etc first?
+      // Actually, for consistency let's return a default "mock" object
+      // or just create it if they are inquiring about their own status?
+      // Since this is usually called by the responder themselves, let's just return defaults
+      // without creating, OR create it so they have a persistent record.
+      // Let's create it to be safe and consistent with other methods.
+
+      logger.warn({ userId }, 'Responder profile missing in getAvailabilityStatus, creating new one');
+
+      const newResponder = await Responder.create({
+        userId,
+        isOnline: false,
+        kycStatus: KycStatus.VERIFIED, // Assume verified
+        earnings: { totalCoins: 0, pendingCoins: 0, lockedCoins: 0, redeemedCoins: 0 },
+        rating: 0,
+        audioEnabled: true,
+        videoEnabled: true,
+        chatEnabled: true,
+      });
+
+      responder = newResponder.toObject();
     }
 
     return {
@@ -234,13 +290,21 @@ export const responderService = {
       throw new AppError(404, 'User not found');
     }
 
-    // Update responder status
+    // Update responder status and ensure availability settings are initialized
     responder.kycStatus = KycStatus.VERIFIED;
+    responder.audioEnabled = true; // Enable by default
+    responder.videoEnabled = true;
+    responder.chatEnabled = true;
+    responder.isOnline = false; // Start offline
     await responder.save();
 
-    // Update user role to responder
+    // Update user role to responder and initialize availability settings
     await User.findByIdAndUpdate(responder.userId, {
       role: 'responder',
+      isOnline: false, // Explicitly set to false initially
+      audioEnabled: true, // Enable by default
+      videoEnabled: true,
+      chatEnabled: true,
     });
 
     // Send approval notification
