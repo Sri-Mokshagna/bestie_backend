@@ -47,7 +47,7 @@ async function checkCallHistoryData() {
             console.log(`\n   🎯 Responder ID: ${responderId}`);
             console.log(`   Type: ${typeof responderId}`);
             
-            if (!responderId || responderId === null || responderId === 'null') {
+            if (!responderId) {
                 console.log(`   ❌ RESPONDER ID IS NULL/INVALID!`);
                 console.log(`   ⚠️  This call has NO responder reference`);
             } else {
