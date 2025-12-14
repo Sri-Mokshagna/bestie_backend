@@ -40,7 +40,7 @@ const callSchema = new Schema<ICall>(
     },
     responderId: {
       type: Schema.Types.ObjectId,
-      ref: 'Responder',
+      ref: 'User',
       required: true,
     },
     type: {
