@@ -1,7 +1,8 @@
 import { Server as SocketServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { Chat, Message } from '../../models/Chat';
-import { User } from '../../models/User';
+import { User, UserRole } from '../../models/User';
+import { Responder } from '../../models/Responder';
 import { coinService } from '../../services/coinService';
 import { logger } from '../../lib/logger';
 import { getAuth } from 'firebase-admin/auth';
@@ -202,8 +203,35 @@ export function initializeChatSocket(io: SocketServer) {
       socket.to(roomId).emit('typing', { userId: socket.userId });
     });
 
-    socket.on('disconnect', () => {
-      logger.info(`User ${socket.userId} disconnected from chat`);
+    socket.on('disconnect', async () => {
+      logger.info(`User ${socket.userId} disconnected from chat (socket: ${socket.id})`);
+      
+      // AUTO-OFFLINE: Set responders offline when they disconnect
+      if (socket.userId) {
+        try {
+          const user = await User.findById(socket.userId);
+          
+          if (user && user.role === UserRole.RESPONDER) {
+            // Update User model
+            user.isOnline = false;
+            user.lastOnlineAt = new Date();
+            await user.save();
+            
+            // Update Responder model
+            await Responder.findOneAndUpdate(
+              { userId: socket.userId },
+              { 
+                isOnline: false,
+                lastOnlineAt: new Date()
+              }
+            );
+            
+            logger.info(`Auto-offline: Responder ${socket.userId} (${user.profile?.name || user.phone}) set to offline on disconnect`);
+          }
+        } catch (error) {
+          logger.error(`Auto-offline error for user ${socket.userId}: ${error}`);
+        }
+      }
     });
   });
 
