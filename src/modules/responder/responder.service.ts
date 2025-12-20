@@ -147,6 +147,16 @@ export const responderService = {
     user.audioEnabled = audioEnabled;
     user.videoEnabled = videoEnabled;
     user.chatEnabled = chatEnabled;
+    
+    // Auto-set isOnline based on availability
+    // If any option is enabled, responder should be online
+    // If all options are disabled, responder goes offline
+    const hasAnyEnabled = audioEnabled || videoEnabled || chatEnabled;
+    user.isOnline = hasAnyEnabled;
+    if (!hasAnyEnabled) {
+      user.lastOnlineAt = new Date();
+    }
+    
     await user.save();
 
     // Also sync to Responder model to keep both in sync
@@ -156,6 +166,7 @@ export const responderService = {
         audioEnabled,
         videoEnabled,
         chatEnabled,
+        isOnline: hasAnyEnabled,
       },
       { upsert: false } // Don't create if missing, lazy creation handles that
     );
@@ -203,10 +214,12 @@ export const responderService = {
       throw new AppError(400, 'User is not a responder');
     }
 
-    // Disable all availability options in User model
+    // Disable all availability options and set offline
     user.audioEnabled = false;
     user.videoEnabled = false;
     user.chatEnabled = false;
+    user.isOnline = false;
+    user.lastOnlineAt = new Date();
     await user.save();
 
     // Also sync to Responder model
@@ -216,6 +229,7 @@ export const responderService = {
         audioEnabled: false,
         videoEnabled: false,
         chatEnabled: false,
+        isOnline: false,
       },
       { upsert: false }
     );
