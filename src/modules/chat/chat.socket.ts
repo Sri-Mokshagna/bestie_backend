@@ -203,6 +203,27 @@ export function initializeChatSocket(io: SocketServer) {
       socket.to(roomId).emit('typing', { userId: socket.userId });
     });
 
+    // Listen for responder availability updates and broadcast to all connected users
+    socket.on('responder_availability_update', async (data) => {
+      try {
+        logger.info({ msg: 'Responder availability update received', data, socketId: socket.id });
+        
+        // Broadcast to ALL connected sockets except the sender
+        // This ensures all users see the real-time availability change
+        socket.broadcast.emit('responder_availability_update', {
+          responderId: data.responderId,
+          audioEnabled: data.audioEnabled,
+          videoEnabled: data.videoEnabled,
+          chatEnabled: data.chatEnabled,
+          isOnline: data.audioEnabled || data.videoEnabled || data.chatEnabled,
+        });
+        
+        logger.info({ msg: 'Availability update broadcasted', responderId: data.responderId });
+      } catch (error) {
+        logger.error({ msg: 'Error broadcasting availability update', error });
+      }
+    });
+
     socket.on('disconnect', async () => {
       logger.info(`User ${socket.userId} disconnected from chat (socket: ${socket.id})`);
       
@@ -212,16 +233,18 @@ export function initializeChatSocket(io: SocketServer) {
           const user = await User.findById(socket.userId);
           
           if (user && user.role === UserRole.RESPONDER) {
-            // Update User model
+            // Update User model - set offline and reset inCall
             user.isOnline = false;
+            user.inCall = false; // Reset inCall in case they were in a call
             user.lastOnlineAt = new Date();
             await user.save();
             
-            // Update Responder model
+            // Update Responder model - set offline and reset inCall
             await Responder.findOneAndUpdate(
               { userId: socket.userId },
               { 
                 isOnline: false,
+                inCall: false, // Reset inCall in case they were in a call
                 lastOnlineAt: new Date()
               }
             );

@@ -58,8 +58,12 @@ export const callService = {
       throw new AppError(400, 'Responder account is not active');
     }
 
-    // Check if responder is online
-    if (!responderUser.isOnline) {
+    // Check if responder is online - consider both isOnline AND availability flags
+    // This matches the logic in getActiveResponders
+    const hasAnyAvailabilityEnabled = responderUser.audioEnabled || responderUser.videoEnabled || responderUser.chatEnabled;
+    const effectivelyOnline = responderUser.isOnline || hasAnyAvailabilityEnabled;
+    
+    if (!effectivelyOnline) {
       throw new AppError(400, 'Responder is currently offline', 'RESPONDER_OFFLINE');
     }
 
@@ -95,7 +99,8 @@ export const callService = {
     if (type === CallType.VIDEO && !responderProfile.videoEnabled) {
       throw new AppError(400, 'Responder is not available for video calls', 'RESPONDER_NOT_AVAILABLE');
     }
-    if (responderProfile.inCall) {
+    // Check inCall status from both User and Responder models
+    if (responderProfile.inCall || responderUser.inCall) {
       throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
     }
 
@@ -240,6 +245,10 @@ export const callService = {
     call.maxDurationSeconds = maxDurationSeconds;
     call.initialCoinBalance = user.coinBalance;
     await call.save();
+
+    // Set inCall flag for responder in both User and Responder models
+    await User.findByIdAndUpdate(call.responderId, { inCall: true });
+    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: true });
 
     // Notify both parties that call is now active with max duration AND server start time
     const startTimeMs = call.startTime.getTime();
@@ -396,6 +405,10 @@ export const callService = {
     call.durationSeconds = durationSeconds;
     await call.save();
 
+    // Reset inCall flag for responder in both User and Responder models
+    await User.findByIdAndUpdate(call.responderId, { inCall: false });
+    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
+
     // Create call history message
     await this.createCallMessage(call);
   },
@@ -415,6 +428,10 @@ export const callService = {
     call.status = CallStatus.ENDED;
     call.endTime = new Date();
     await call.save();
+
+    // Reset inCall flag for responder (call never truly connected, but safety reset)
+    await User.findByIdAndUpdate(call.responderId, { inCall: false });
+    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
 
     // Notify both parties about connection failure
     emitToUser(call.userId.toString(), 'call_ended', {
@@ -449,6 +466,10 @@ export const callService = {
     call.status = CallStatus.REJECTED;
     call.endTime = new Date();
     await call.save();
+
+    // Reset inCall flag for responder if it was set during RINGING
+    await User.findByIdAndUpdate(call.responderId, { inCall: false });
+    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
 
     // Notify caller that call was rejected
     emitToUser(call.userId.toString(), 'call_ended', {
@@ -763,25 +784,32 @@ export const callService = {
       call.endTime = now;
       await call.save();
       await this.createCallMessage(call);
+      
+      // Reset inCall flag for responder
+      await User.findByIdAndUpdate(call.responderId, { inCall: false });
+      await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
     }
 
-    // Mark old active calls as ended (shouldn't happen, but just in case)
-    const activeResult = await Call.updateMany(
-      {
-        status: CallStatus.ACTIVE,
-        startTime: { $lt: sixtySecondsAgo },
-      },
-      {
-        $set: {
-          status: CallStatus.ENDED,
-          endTime: now,
-        },
-      }
-    );
+    // Find old active calls to mark as ended
+    const activeCalls = await Call.find({
+      status: CallStatus.ACTIVE,
+      startTime: { $lt: sixtySecondsAgo },
+    });
+
+    // Mark old active calls as ended and reset inCall flags
+    for (const call of activeCalls) {
+      call.status = CallStatus.ENDED;
+      call.endTime = now;
+      await call.save();
+      
+      // Reset inCall flag for responder
+      await User.findByIdAndUpdate(call.responderId, { inCall: false });
+      await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
+    }
 
     return {
       ringingCallsCleaned: ringingCalls.length,
-      activeCallsCleaned: activeResult.modifiedCount,
+      activeCallsCleaned: activeCalls.length,
     };
   },
 
