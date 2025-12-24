@@ -3,6 +3,7 @@ import { User } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
 import { notificationService } from '../../lib/notification';
 import { logger } from '../../lib/logger';
+import { serializeResponder } from '../../utils/serializer';
 
 export const responderService = {
   async getResponders(onlineOnly?: boolean, page = 1, limit = 20, userLanguage?: string) {
@@ -28,16 +29,16 @@ export const responderService = {
       .limit(limit)
       .lean();
 
-    // Populate user data
-    const respondersWithUsers = await Promise.all(
-      responders.map(async (responder) => {
-        const user = await User.findById(responder.userId).lean();
-        return {
-          responder,
-          user,
-        };
-      })
-    );
+    // PERFORMANCE FIX: Batch fetch all users in ONE query instead of N queries
+    const userIds = responders.map(r => r.userId);
+    const users = await User.find({ _id: { $in: userIds } }).lean();
+    const userMap = new Map(users.map(u => [u._id.toString(), u]));
+
+    const respondersWithUsers = responders.map((responder) => {
+      const user = userMap.get(responder.userId.toString()) || null;
+      // Use serializer to properly format the response
+      return serializeResponder(responder, user);
+    });
 
     // If user has a language preference, prioritize responders with the same language
     if (userLanguage) {
@@ -67,10 +68,8 @@ export const responderService = {
       throw new AppError(404, 'User not found');
     }
 
-    return {
-      responder,
-      user,
-    };
+    // Use serializer to properly format the response
+    return serializeResponder(responder, user);
   },
 
   async toggleOnlineStatus(userId: string, isOnline: boolean) {
@@ -252,23 +251,25 @@ export const responderService = {
       .sort({ createdAt: -1 })
       .lean();
 
-    // Populate user data
-    const applications = await Promise.all(
-      responders.map(async (responder) => {
-        const user = await User.findById(responder.userId).lean();
-        return {
-          id: responder._id,
-          userId: responder.userId,
-          name: user?.profile?.name || 'Unknown',
-          gender: user?.profile?.gender || 'unknown',
-          bio: responder.bio,
-          aadharImageUrl: responder.kycDocs?.idProof || '',
-          voiceRecordingUrl: responder.kycDocs?.voiceProof || '',
-          appliedAt: responder.createdAt,
-          status: responder.kycStatus,
-        };
-      })
-    );
+    // PERFORMANCE FIX: Batch fetch all users in ONE query
+    const userIds = responders.map(r => r.userId);
+    const users = await User.find({ _id: { $in: userIds } }).lean();
+    const userMap = new Map(users.map(u => [u._id.toString(), u]));
+
+    const applications = responders.map((responder) => {
+      const user = userMap.get(responder.userId.toString());
+      return {
+        id: responder._id,
+        userId: responder.userId,
+        name: user?.profile?.name || 'Unknown',
+        gender: user?.profile?.gender || 'unknown',
+        bio: responder.bio,
+        aadharImageUrl: responder.kycDocs?.idProof || '',
+        voiceRecordingUrl: responder.kycDocs?.voiceProof || '',
+        appliedAt: responder.createdAt,
+        status: responder.kycStatus,
+      };
+    });
 
     return applications;
   },

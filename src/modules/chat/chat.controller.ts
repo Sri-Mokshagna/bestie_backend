@@ -10,56 +10,82 @@ export const chatController = {
       throw new AppError(401, 'Not authenticated');
     }
 
-    const chats = await Chat.find({
-      participants: req.user.id,
-    })
-      .sort({ lastMessageAt: -1 })
+    const userId = req.user.id;
+
+    // PERFORMANCE FIX: Use aggregation to get chats with last message in ONE query
+    const chatsWithMessages = await Chat.aggregate([
+      { $match: { participants: userId } },
+      { $sort: { lastMessageAt: -1 } },
+      // Lookup last message for each chat
+      {
+        $lookup: {
+          from: 'messages',
+          let: { chatId: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$chatId', '$$chatId'] } } },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 }
+          ],
+          as: 'lastMessageArr'
+        }
+      },
+      // Add lastMessage field
+      {
+        $addFields: {
+          lastMessage: { $arrayElemAt: ['$lastMessageArr', 0] }
+        }
+      },
+      { $project: { lastMessageArr: 0 } }
+    ]);
+
+    // Get all partner IDs in one go
+    const partnerIds = chatsWithMessages.map((chat: any) => {
+      const partnerId = chat.participants.find(
+        (p: any) => p.toString() !== userId.toString()
+      );
+      return partnerId;
+    }).filter(Boolean);
+
+    // PERFORMANCE FIX: Batch fetch all partners in ONE query
+    const partners = await User.find({ _id: { $in: partnerIds } })
+      .select('profile phone isOnline')
       .lean();
 
-    // Get last message for each chat and format with partner info
-    const chatsWithPartners = await Promise.all(
-      chats.map(async (chat) => {
-        const lastMessage = await Message.findOne({ chatId: chat._id })
-          .sort({ createdAt: -1 })
-          .lean();
+    // Create a map for quick lookup
+    const partnerMap = new Map(partners.map(p => [p._id.toString(), p]));
 
-        // Find the chat partner (the other participant)
-        // participants is an array of ObjectIds at this point (not populated)
-        const partnerIdObj = chat.participants.find(
-          (p: any) => p.toString() !== req.user!.id.toString()
-        );
+    // Format response
+    const chatsWithPartners = chatsWithMessages.map((chat: any) => {
+      const partnerIdObj = chat.participants.find(
+        (p: any) => p.toString() !== userId.toString()
+      );
+      const partnerId = partnerIdObj?.toString();
+      const partner = partnerId ? partnerMap.get(partnerId) : null;
+      const lastMessage = chat.lastMessage;
 
-        if (!partnerIdObj) {
-          throw new AppError(500, 'Invalid chat participants');
-        }
-
-        const partnerId = partnerIdObj.toString();
-        const partner = await User.findById(partnerId).select('profile phone isOnline').lean();
-
-        return {
-          chat: {
-            id: chat._id,
-            participants: chat.participants.map((p: any) => p.toString()),
-            createdAt: chat.createdAt,
-            updatedAt: chat.updatedAt,
-            lastMessage: lastMessage ? {
-              id: lastMessage._id.toString(),
-              chatId: lastMessage.chatId.toString(),
-              senderId: lastMessage.senderId.toString(),
-              content: lastMessage.content,
-              type: (lastMessage as any).type || 'text',
-              metadata: (lastMessage as any).metadata || null,
-              createdAt: lastMessage.createdAt,
-              readAt: lastMessage.readAt,
-            } : null,
-          },
-          partnerId: partnerId,
-          partnerName: partner?.profile?.name || partner?.phone || 'User',
-          partnerAvatar: partner?.profile?.avatar || null,
-          isOnline: partner?.isOnline || false,
-        };
-      })
-    );
+      return {
+        chat: {
+          id: chat._id,
+          participants: chat.participants.map((p: any) => p.toString()),
+          createdAt: chat.createdAt,
+          updatedAt: chat.updatedAt,
+          lastMessage: lastMessage ? {
+            id: lastMessage._id.toString(),
+            chatId: lastMessage.chatId.toString(),
+            senderId: lastMessage.senderId.toString(),
+            content: lastMessage.content,
+            type: lastMessage.type || 'text',
+            metadata: lastMessage.metadata || null,
+            createdAt: lastMessage.createdAt,
+            readAt: lastMessage.readAt,
+          } : null,
+        },
+        partnerId: partnerId || '',
+        partnerName: partner?.profile?.name || partner?.phone || 'User',
+        partnerAvatar: partner?.profile?.avatar || null,
+        isOnline: partner?.isOnline || false,
+      };
+    });
 
     res.json({ chats: chatsWithPartners });
   },

@@ -108,15 +108,19 @@ export function initializeChatSocket(io: SocketServer) {
           return;
         }
 
-        // Verify chat exists and user is participant
-        const chat = await Chat.findById(roomId);
+        // PERFORMANCE: Run initial validations in parallel
+        const [chat, chatEnabled] = await Promise.all([
+          Chat.findById(roomId).lean(),
+          coinService.isFeatureEnabled('chat'),
+        ]);
+        
         if (!chat) {
           socket.emit('error', { message: 'Chat not found' });
           return;
         }
 
         const isParticipant = chat.participants.some(
-          (p) => p.toString() === socket.userId
+          (p: any) => p.toString() === socket.userId
         );
 
         if (!isParticipant) {
@@ -126,7 +130,7 @@ export function initializeChatSocket(io: SocketServer) {
 
         // Get the other participant (responder)
         const responderId = chat.participants.find(
-          (p) => p.toString() !== socket.userId
+          (p: any) => p.toString() !== socket.userId
         );
 
         if (!responderId) {
@@ -135,7 +139,6 @@ export function initializeChatSocket(io: SocketServer) {
         }
 
         // Check if chat is enabled
-        const chatEnabled = await coinService.isFeatureEnabled('chat');
         if (!chatEnabled) {
           socket.emit('error', {
             message: 'Chat feature is currently disabled',
@@ -172,22 +175,34 @@ export function initializeChatSocket(io: SocketServer) {
           coinsCharged: result.coinsDeducted,
         });
 
-        // Update chat last message time
-        chat.lastMessageAt = new Date();
-        await chat.save();
+        // PERFORMANCE: Format message immediately without populate (we know the senderId)
+        // This saves a DB query and speeds up message delivery
+        const fastMessage = {
+          id: message._id.toString(),
+          _id: message._id.toString(),
+          chatId: message.chatId.toString(),
+          senderId: message.senderId.toString(),
+          content: message.content,
+          type: message.type || 'text',
+          coinsCharged: message.coinsCharged,
+          createdAt: message.createdAt,
+        };
 
-        // Populate sender info
-        const populatedMessage = await Message.findById(message._id)
-          .populate('senderId', 'profile phone')
-          .lean();
+        // PERFORMANCE: Emit to room IMMEDIATELY (don't wait for chat.save)
+        io.to(roomId).emit('new_message', fastMessage);
 
-        // Broadcast to room
-        io.to(roomId).emit('new_message', populatedMessage);
-
-        // Send updated balance to sender
+        // Send updated balance to sender immediately
         socket.emit('coin_balance_updated', {
           balance: result.balance,
           coinsDeducted: result.coinsDeducted,
+        });
+
+        // BACKGROUND: Update chat lastMessageAt (non-blocking)
+        Chat.updateOne(
+          { _id: roomId },
+          { lastMessageAt: new Date() }
+        ).exec().catch(err => {
+          logger.error(`Failed to update chat lastMessageAt: ${err}`);
         });
 
         logger.info(

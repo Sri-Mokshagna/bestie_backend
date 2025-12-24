@@ -232,37 +232,39 @@ export const getResponderDetails = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Responder not found' });
     }
 
-    // Get responder's earnings
-    const earnings = await Payout.aggregate([
-      { $match: { responder: responder._id } },
-      {
-        $group: {
-          _id: null,
-          totalEarned: { $sum: '$coins' },
-          totalPaidOut: {
-            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, '$amountINR', 0] },
-          },
-          pendingPayouts: {
-            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, '$amountINR', 0] },
+    // PERFORMANCE FIX: Run both aggregations in PARALLEL
+    const [earnings, callStats] = await Promise.all([
+      // Get responder's earnings
+      Payout.aggregate([
+        { $match: { responder: responder._id } },
+        {
+          $group: {
+            _id: null,
+            totalEarned: { $sum: '$coins' },
+            totalPaidOut: {
+              $sum: { $cond: [{ $eq: ['$status', 'completed'] }, '$amountINR', 0] },
+            },
+            pendingPayouts: {
+              $sum: { $cond: [{ $eq: ['$status', 'pending'] }, '$amountINR', 0] },
+            },
           },
         },
-      },
-    ]);
-
-    // Get responder's call stats
-    const callStats = await Call.aggregate([
-      { $match: { responder: responder._id } },
-      {
-        $group: {
-          _id: null,
-          totalCalls: { $sum: 1 },
-          completedCalls: {
-            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] },
+      ]),
+      // Get responder's call stats
+      Call.aggregate([
+        { $match: { responder: responder._id } },
+        {
+          $group: {
+            _id: null,
+            totalCalls: { $sum: 1 },
+            completedCalls: {
+              $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] },
+            },
+            totalDuration: { $sum: '$duration' },
+            totalCoinsEarned: { $sum: '$coinsCharged' },
           },
-          totalDuration: { $sum: '$duration' },
-          totalCoinsEarned: { $sum: '$coinsCharged' },
         },
-      },
+      ]),
     ]);
 
     res.json({
@@ -288,48 +290,42 @@ export const getResponderDetails = async (req: Request, res: Response) => {
 // Get dashboard analytics
 export const getDashboardAnalytics = async (req: Request, res: Response) => {
   try {
-    // Total users
-    const totalUsers = await User.countDocuments({ role: 'user' });
-    const activeUsers = await User.countDocuments({ role: 'user', status: 'active' });
-
-    // Total responders
-    const totalResponders = await User.countDocuments({ role: 'responder' });
-    const onlineResponders = await User.countDocuments({
-      role: 'responder',
-      isOnline: true,
-    });
-
-    // Active calls
-    const activeCalls = await Call.countDocuments({ status: 'active' });
-
-    // Today's stats
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const todayCalls = await Call.countDocuments({
-      createdAt: { $gte: today },
-    });
-
-    const todayRevenue = await Call.aggregate([
-      { $match: { createdAt: { $gte: today }, status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$coinsCharged' } } },
-    ]);
-
-    // This week's stats
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
-    const weekCalls = await Call.countDocuments({
-      createdAt: { $gte: weekAgo },
-    });
-
-    const weekRevenue = await Call.aggregate([
-      { $match: { createdAt: { $gte: weekAgo }, status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$coinsCharged' } } },
+    // PERFORMANCE FIX: Run ALL queries in PARALLEL
+    const [
+      totalUsers,
+      activeUsers,
+      totalResponders,
+      onlineResponders,
+      activeCalls,
+      todayCalls,
+      todayRevenue,
+      weekCalls,
+      weekRevenue,
+      pendingPayouts,
+    ] = await Promise.all([
+      User.countDocuments({ role: 'user' }),
+      User.countDocuments({ role: 'user', status: 'active' }),
+      User.countDocuments({ role: 'responder' }),
+      User.countDocuments({ role: 'responder', isOnline: true }),
+      Call.countDocuments({ status: 'active' }),
+      Call.countDocuments({ createdAt: { $gte: today } }),
+      Call.aggregate([
+        { $match: { createdAt: { $gte: today }, status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$coinsCharged' } } },
+      ]),
+      Call.countDocuments({ createdAt: { $gte: weekAgo } }),
+      Call.aggregate([
+        { $match: { createdAt: { $gte: weekAgo }, status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$coinsCharged' } } },
+      ]),
+      Payout.countDocuments({ status: 'pending' }),
     ]);
-
-    // Pending payouts
-    const pendingPayouts = await Payout.countDocuments({ status: 'pending' });
 
     res.json({
       users: {
