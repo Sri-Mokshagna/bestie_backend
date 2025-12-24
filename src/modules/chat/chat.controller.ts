@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { Types } from 'mongoose';
 import { AuthRequest } from '../../middleware/auth';
 import { Chat, Message } from '../../models/Chat';
 import { User } from '../../models/User';
@@ -11,10 +12,12 @@ export const chatController = {
     }
 
     const userId = req.user.id;
+    // Convert to ObjectId for aggregation query
+    const userObjectId = new Types.ObjectId(userId);
 
     // PERFORMANCE FIX: Use aggregation to get chats with last message in ONE query
     const chatsWithMessages = await Chat.aggregate([
-      { $match: { participants: userId } },
+      { $match: { participants: userObjectId } },
       { $sort: { lastMessageAt: -1 } },
       // Lookup last message for each chat
       {
@@ -157,9 +160,13 @@ export const chatController = {
       throw new AppError(400, 'Participant ID is required');
     }
 
+    // Convert to ObjectIds for proper MongoDB comparison
+    const userObjectId = new Types.ObjectId(req.user.id);
+    const participantObjectId = new Types.ObjectId(participantId);
+
     // Check if chat already exists
     const existingChat = await Chat.findOne({
-      participants: { $all: [req.user.id, participantId] },
+      participants: { $all: [userObjectId, participantObjectId] },
     });
 
     if (existingChat) {
@@ -168,7 +175,7 @@ export const chatController = {
 
     // Create new chat
     const chat = await Chat.create({
-      participants: [req.user.id, participantId],
+      participants: [userObjectId, participantObjectId],
     });
 
     return res.json({ chat });
@@ -202,8 +209,8 @@ export const chatController = {
 
     // Create the message
     const message = await Message.create({
-      chatId: chatId,
-      senderId: req.user.id,
+      chatId: new Types.ObjectId(chatId),
+      senderId: new Types.ObjectId(req.user.id),
       content: content.trim(),
       coinsCharged: 0, // TODO: Implement coin charging logic
     });

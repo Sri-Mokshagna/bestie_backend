@@ -531,22 +531,14 @@ export const callService = {
       logger.info({ callId: String(call._id) }, 'Cancelled scheduled call termination');
     }
 
-    // Calculate actual duration and deduct coins
-    try {
-      await this.endCallAndDeductCoins(call);
-    } catch (error: any) {
-      logger.error({ error: error.message, callId: String(call._id) }, 'Error in endCallAndDeductCoins, but continuing to emit events');
-      // Continue to emit events even if coin deduction fails
-    }
-
+    // PERFORMANCE FIX: Emit socket events IMMEDIATELY before any slow operations
+    // This ensures the remote party can navigate away instantly
     logger.info({
       callId: String(call._id),
       caller: call.userId.toString(),
       responder: call.responderId.toString()
-    }, '📤 Emitting call_ended events to both parties');
+    }, '📤 Emitting call_ended events IMMEDIATELY to both parties');
 
-    // Emit socket event to both parties that call has ended
-    // This is critical - ensure it happens even if database operations fail
     try {
       emitToUser(call.userId.toString(), 'call_ended', {
         callId: String(call._id),
@@ -557,6 +549,14 @@ export const callService = {
       logger.info({ callId: String(call._id) }, '✅ Call ended events emitted successfully');
     } catch (error: any) {
       logger.error({ error: error.message, callId: String(call._id) }, '❌ Failed to emit call_ended events');
+    }
+
+    // Now do the slow coin deduction in background (non-blocking for the caller)
+    // Calculate actual duration and deduct coins
+    try {
+      await this.endCallAndDeductCoins(call);
+    } catch (error: any) {
+      logger.error({ error: error.message, callId: String(call._id) }, 'Error in endCallAndDeductCoins');
     }
 
     logger.info({ callId: String(call._id) }, '✅ Call ended successfully');

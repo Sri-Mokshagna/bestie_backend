@@ -1,5 +1,6 @@
 import { Server as SocketServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
+import { Types } from 'mongoose';
 import { Chat, Message } from '../../models/Chat';
 import { User, UserRole } from '../../models/User';
 import { Responder } from '../../models/Responder';
@@ -168,8 +169,8 @@ export function initializeChatSocket(io: SocketServer) {
 
         // Create message
         const message = await Message.create({
-          chatId: roomId,
-          senderId: socket.userId,
+          chatId: new Types.ObjectId(roomId),
+          senderId: new Types.ObjectId(socket.userId),
           content: body,
           type: 'text',
           coinsCharged: result.coinsDeducted,
