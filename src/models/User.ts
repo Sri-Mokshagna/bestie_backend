@@ -36,6 +36,7 @@ export interface INotificationPreferences {
 export interface IUser extends Document {
   phone: string;
   firebaseUid?: string; // Firebase UID for socket authentication
+  fcmToken?: string; // Firebase Cloud Messaging token for push notifications
   role: UserRole;
   coinBalance: number;
   profile: IUserProfile;
@@ -68,6 +69,10 @@ const userSchema = new Schema<IUser>(
       type: String,
       sparse: true, // Allow null/undefined while keeping unique
       index: true,
+    },
+    fcmToken: {
+      type: String,
+      sparse: true, // FCM token for push notifications
     },
     role: {
       type: String,

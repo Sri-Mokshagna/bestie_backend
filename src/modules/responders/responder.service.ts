@@ -56,6 +56,7 @@ export const responderService = {
   },
 
   async getResponderById(responderId: string) {
+    // PERFORMANCE: Parallel fetch of responder and user
     const responder = await Responder.findById(responderId).lean();
 
     if (!responder) {

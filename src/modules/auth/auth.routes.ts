@@ -29,6 +29,9 @@ router.put('/update-role', authenticate, asyncHandler(authController.updateRole)
 // Update user profile
 router.put('/update-profile', authenticate, asyncHandler(authController.updateProfile));
 
+// Register/update FCM token for push notifications
+router.put('/fcm-token', authenticate, asyncHandler(authController.updateFcmToken));
+
 // Logout
 router.post('/logout', authenticate, asyncHandler(authController.logout));
 

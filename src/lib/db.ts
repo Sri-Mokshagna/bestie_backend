@@ -5,9 +5,16 @@ export async function connectDB() {
   try {
     const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/bestie';
     
-    await mongoose.connect(uri);
+    // PERFORMANCE: Configure connection pool for better performance
+    await mongoose.connect(uri, {
+      maxPoolSize: 50, // Max connections in pool
+      minPoolSize: 10, // Min connections to maintain
+      serverSelectionTimeoutMS: 5000, // Timeout for server selection
+      socketTimeoutMS: 45000, // Socket timeout
+      family: 4, // Use IPv4
+    });
     
-    logger.info('MongoDB connected successfully');
+    logger.info('MongoDB connected successfully with connection pool (min: 10, max: 50)');
 
     mongoose.connection.on('error', (err) => {
       logger.error({ err }, 'MongoDB connection error');

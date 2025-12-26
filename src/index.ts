@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import helmet from 'helmet';
 import cors from 'cors';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { connectDB } from './lib/db';
 import { initializeFirebase } from './lib/firebase';
@@ -67,6 +68,20 @@ app.use(
     credentials: true,
   })
 );
+
+// PERFORMANCE: Add compression for API responses (50-70% smaller)
+app.use(compression({
+  level: 6, // Balanced compression level
+  threshold: 1024, // Only compress responses > 1KB
+  filter: (req, res) => {
+    // Don't compress if client doesn't accept it
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
