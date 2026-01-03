@@ -1,7 +1,179 @@
 import { Router, Request, Response } from 'express';
+import { cashfreeService } from '../lib/cashfree';
+import { Payment } from '../models/Payment';
 import { logger } from '../lib/logger';
 
 const router = Router();
+
+router.get('/initiate', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.query;
+    
+    if (!orderId || typeof orderId !== 'string') {
+      return res.status(400).send('Order ID is required');
+    }
+    
+    logger.info({ orderId }, 'Payment initiation request');
+    
+    // Get the payment details from the database
+    const payment = await Payment.findOne({ orderId });
+    
+    if (!payment) {
+      logger.error({ orderId }, 'Payment not found for initiation');
+      return res.status(404).send('Payment order not found');
+    }
+    
+    // Get the Cashfree order details to get the payment link
+    try {
+      const cashfreeStatus = await cashfreeService.getPaymentStatus(orderId);
+      
+      // If payment is already processed, redirect to appropriate page
+      if (cashfreeStatus.order_status && cashfreeStatus.order_status !== 'ACTIVE') {
+        const redirectUrl = cashfreeStatus.order_status === 'PAID' 
+          ? `/payment/success?orderId=${orderId}`
+          : `/payment/failure?orderId=${orderId}`;
+        return res.redirect(redirectUrl);
+      }
+      
+      // For now, send a simple HTML page that redirects to Cashfree
+      // In a real implementation, you might want to use Cashfree's checkout.js
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Processing Payment...</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+            }
+            .container {
+              text-align: center;
+              padding: 2rem;
+              max-width: 400px;
+            }
+            .spinner {
+              width: 40px;
+              height: 40px;
+              border: 4px solid rgba(255,255,255,0.3);
+              border-radius: 50%;
+              border-top-color: white;
+              animation: spin 1s ease-in-out infinite;
+              margin: 0 auto 1rem;
+            }
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+            h1 {
+              margin: 0 0 1rem 0;
+              font-size: 1.5rem;
+            }
+            p {
+              margin: 0.5rem 0;
+              opacity: 0.9;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="spinner"></div>
+            <h1>Redirecting to Payment Gateway</h1>
+            <p>Setting up your secure payment...</p>
+            <p>Order ID: ${orderId}</p>
+          </div>
+          <script>
+            // For Cashfree, we need to redirect to the hosted payment page
+            // or use their checkout.js - this is a simplified approach
+            // In production, you might want to use Cashfree's checkout integration
+            setTimeout(() => {
+              window.location.href = 'https://api.cashfree.com/pg/orders/${orderId}/pay';
+            }, 2000);
+          </script>
+        </body>
+        </html>
+      `);
+    } catch (error) {
+      logger.error({ orderId, error }, 'Error getting Cashfree payment status');
+      
+      // Fallback: try to construct the payment URL directly
+      const config = cashfreeService['config'] || cashfreeService.initializeConfig();
+      const baseUrl = config?.baseUrl || 'https://sandbox.cashfree.com/pg';
+      
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Processing Payment...</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+            }
+            .container {
+              text-align: center;
+              padding: 2rem;
+              max-width: 400px;
+            }
+            .spinner {
+              width: 40px;
+              height: 40px;
+              border: 4px solid rgba(255,255,255,0.3);
+              border-radius: 50%;
+              border-top-color: white;
+              animation: spin 1s ease-in-out infinite;
+              margin: 0 auto 1rem;
+            }
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+            h1 {
+              margin: 0 0 1rem 0;
+              font-size: 1.5rem;
+            }
+            p {
+              margin: 0.5rem 0;
+              opacity: 0.9;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="spinner"></div>
+            <h1>Redirecting to Payment Gateway</h1>
+            <p>Setting up your secure payment...</p>
+            <p>Order ID: ${orderId}</p>
+          </div>
+          <script>
+            // Redirect to Cashfree payment page
+            setTimeout(() => {
+              window.location.href = '${baseUrl.replace('/pg', '')}/pg/orders/${orderId}/pay';
+            }, 2000);
+          </script>
+        </body>
+        </html>
+      `);
+    }
+  } catch (error) {
+    logger.error({ error }, 'Error in payment initiation');
+    res.status(500).send('Error processing payment initiation');
+  }
+});
 
 /**
  * Payment redirect handler

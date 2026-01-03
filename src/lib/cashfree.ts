@@ -209,9 +209,9 @@ class CashfreeService {
 
       logger.info({ orderId: orderData.orderId }, 'Cashfree order created');
 
-      // For production, return the order details directly
-      // Payment will be processed via the payment gateway URL
-      const paymentUrl = `${config.baseUrl.replace('/pg', '')}/orders/${orderData.orderId}/pay`;
+      // For mobile apps, we return a server-side payment page URL
+      // This page will handle the Cashfree payment flow
+      const paymentUrl = `${process.env.SERVER_URL || 'http://localhost:3000'}/payment/initiate?orderId=${orderData.orderId}`;
 
       logger.info({ orderId: orderData.orderId, paymentUrl }, 'Payment URL generated');
 
