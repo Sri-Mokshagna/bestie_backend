@@ -28,8 +28,11 @@ export function parseCashfreeWebhook(webhookData: any): {
         payment_method = webhookData.data?.payment?.payment_method;
         cf_payment_id = webhookData.data?.payment?.cf_payment_id;
 
-        // Extract our original order ID from link_id (format: LINK_ORDER_xxx)
-        if (webhookData.data?.order?.order_tags?.link_id) {
+        // Extract our original order ID from order_tags
+        if (webhookData.data?.order?.order_tags?.original_order_id) {
+            ourOrderId = webhookData.data.order.order_tags.original_order_id;
+        } else if (webhookData.data?.order?.order_tags?.link_id) {
+            // Fallback for old format
             const linkId = webhookData.data.order.order_tags.link_id;
             ourOrderId = linkId.replace(/^LINK_/, '');
         }

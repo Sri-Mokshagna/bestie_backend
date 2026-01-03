@@ -194,7 +194,7 @@ class CashfreeService {
         },
         // Add order tags to help with webhook matching
         order_tags: {
-          link_id: `LINK_${orderData.orderId}`,
+          original_order_id: orderData.orderId,
         },
       };
 
@@ -209,43 +209,16 @@ class CashfreeService {
 
       logger.info({ orderId: orderData.orderId }, 'Cashfree order created');
 
-      // Step 2: Create payment link for the order
-      const linkPayload = {
-        link_id: `LINK_${orderData.orderId}`,
-        link_amount: orderData.amount,
-        link_currency: orderData.currency,
-        link_purpose: `Payment for ${orderData.orderId}`,
-        customer_details: {
-          customer_phone: orderData.customerDetails.customerPhone,
-          customer_email: orderData.customerDetails.customerEmail,
-          customer_name: orderData.customerDetails.customerName,
-        },
-        link_notify: {
-          send_sms: false,
-          send_email: false,
-        },
-        link_meta: {
-          return_url: orderData.returnUrl,
-          notify_url: orderData.notifyUrl,
-        },
-        // Add order tags to help with webhook matching
-        link_meta_tags: {
-          order_id: orderData.orderId,
-        },
-      };
+      // For production, return the order details directly
+      // Payment will be processed via the payment gateway URL
+      const paymentUrl = `${config.baseUrl.replace('/pg', '')}/orders/${orderData.orderId}/pay`;
 
-      const linkResponse = await axios.post(
-        `${config.baseUrl}/links`,
-        linkPayload,
-        { headers: this.getHeaders() }
-      );
-
-      logger.info({ orderId: orderData.orderId, link: linkResponse.data.link_url }, 'Payment link created');
+      logger.info({ orderId: orderData.orderId, paymentUrl }, 'Payment URL generated');
 
       return {
         order: orderResponse.data,
-        payment_link: linkResponse.data.link_url,
-        link_id: linkResponse.data.link_id,
+        payment_link: paymentUrl, // Return the payment URL directly
+        link_id: orderData.orderId, // Use order ID as link ID
       };
     } catch (error: any) {
       logger.error({
