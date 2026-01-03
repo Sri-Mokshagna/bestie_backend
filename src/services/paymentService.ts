@@ -8,6 +8,7 @@ import { coinService } from './coinService';
 import { TransactionType } from '../models/Transaction';
 import { logger } from '../lib/logger';
 import { AppError } from '../middleware/errorHandler';
+import { parseCashfreeWebhook } from './paymentWebhookHandler';
 
 export class PaymentService {
   async createPaymentOrder(userId: string, planId: string) {
@@ -42,7 +43,7 @@ export class PaymentService {
 
       await payment.save();
 
-      const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
+      const serverUrl = process.env.SERVER_URL || (process.env.NODE_ENV === 'production' ? 'https://bestie-backend-zmj2.onrender.com' : 'http://localhost:3000');
 
       const result = await cashfreeService.createOrderAndGetLink({
         orderId,
@@ -85,37 +86,11 @@ export class PaymentService {
         throw new AppError(400, 'Invalid webhook signature');
       }
 
-      // Parse webhook based on type
-      const webhookType = webhookData.type;
-      let order_id: string;
-      let payment_status: string;
-      let payment_method: any;
-      let cf_payment_id: string;
-      let ourOrderId: string | null = null;
-
-      if (webhookType === 'PAYMENT_SUCCESS_WEBHOOK' || webhookType === 'PAYMENT_FAILED_WEBHOOK') {
-        order_id = webhookData.data?.order?.order_id;
-        payment_status = webhookData.data?.payment?.payment_status;
-        payment_method = webhookData.data?.payment?.payment_method;
-        cf_payment_id = webhookData.data?.payment?.cf_payment_id;
-        if (webhookData.data?.order?.order_tags?.link_id) {
-          ourOrderId = webhookData.data.order.order_tags.link_id.replace(/^LINK_/, '');
-        }
-      } else if (webhookType === 'PAYMENT_LINK_EVENT') {
-        order_id = webhookData.data?.order?.order_id;
-        payment_status = webhookData.data?.order?.transaction_status === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
-        payment_method = null;
-        cf_payment_id = webhookData.data?.order?.transaction_id;
-        if (webhookData.data?.link_id) {
-          ourOrderId = webhookData.data.link_id.replace(/^LINK_/, '');
-        }
-      } else {
-        logger.warn({ webhookType }, 'Unknown webhook type');
-        return;
-      }
+      // Parse webhook using dedicated handler
+      const { order_id, payment_status, payment_method, cf_payment_id, ourOrderId } = parseCashfreeWebhook(webhookData);
 
       logger.info({
-        webhookType,
+        webhookType: webhookData.type,
         cashfreeOrderId: order_id,
         ourOrderId,
         payment_status

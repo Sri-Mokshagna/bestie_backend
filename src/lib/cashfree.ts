@@ -104,6 +104,7 @@ class CashfreeService {
             'X-Client-Id': config.clientId,
             'X-Client-Secret': config.clientSecret,
           },
+          timeout: 10000, // 10 second timeout
         }
       );
 
@@ -129,6 +130,10 @@ class CashfreeService {
       logger.error({
         error: error.response?.data || error.message,
         statusCode: error.response?.status,
+        config: {
+          baseUrl: this.payoutConfig?.baseUrl,
+          clientId: this.payoutConfig?.clientId?.substring(0, 10),
+        }
       }, 'Failed to get Cashfree Payout token');
 
       // Provide helpful error message if credentials are not configured
@@ -178,6 +183,10 @@ class CashfreeService {
           return_url: orderData.returnUrl,
           notify_url: orderData.notifyUrl,
         },
+        // Add order tags to help with webhook matching
+        order_tags: {
+          link_id: `LINK_${orderData.orderId}`,
+        },
       };
 
       const config = this.initializeConfig();
@@ -209,6 +218,10 @@ class CashfreeService {
         link_meta: {
           return_url: orderData.returnUrl,
           notify_url: orderData.notifyUrl,
+        },
+        // Add order tags to help with webhook matching
+        link_meta_tags: {
+          order_id: orderData.orderId,
         },
       };
 
@@ -266,10 +279,22 @@ class CashfreeService {
         .update(rawBody)
         .digest('base64');
 
-      return crypto.timingSafeEqual(
+      const isValid = crypto.timingSafeEqual(
         Buffer.from(signature),
         Buffer.from(expectedSignature)
       );
+      
+      if (!isValid) {
+        logger.error({
+          receivedSignature: signature,
+          expectedSignature,
+          rawBodyLength: rawBody.length
+        }, 'Webhook signature verification failed');
+      } else {
+        logger.info('Webhook signature verification passed');
+      }
+
+      return isValid;
     } catch (error) {
       logger.error({ error }, 'Webhook signature verification failed');
       return false;
@@ -326,7 +351,10 @@ class CashfreeService {
       const response = await axios.post(
         `${config.baseUrl}/addBeneficiary`,
         payload,
-        { headers }
+        { 
+          headers,
+          timeout: 15000, // 15 second timeout for payout operations
+        }
       );
 
       logger.info({ beneId: data.beneId }, 'Beneficiary created successfully');
@@ -341,6 +369,10 @@ class CashfreeService {
       logger.error({
         error: error.response?.data || error.message,
         beneId: data.beneId,
+        config: {
+          baseUrl: this.payoutConfig?.baseUrl,
+          clientId: this.payoutConfig?.clientId?.substring(0, 10),
+        }
       }, 'Failed to create beneficiary');
       throw error;
     }
@@ -368,7 +400,10 @@ class CashfreeService {
       const response = await axios.post(
         `${config.baseUrl}/requestTransfer`,
         payload,
-        { headers }
+        { 
+          headers,
+          timeout: 15000, // 15 second timeout for payout operations
+        }
       );
 
       logger.info({
@@ -381,6 +416,10 @@ class CashfreeService {
       logger.error({
         error: error.response?.data || error.message,
         transferId: data.transferId,
+        config: {
+          baseUrl: this.payoutConfig?.baseUrl,
+          clientId: this.payoutConfig?.clientId?.substring(0, 10),
+        }
       }, 'Failed to request payout');
       throw error;
     }
@@ -396,6 +435,7 @@ class CashfreeService {
         {
           headers,
           params: { transferId },
+          timeout: 10000, // 10 second timeout
         }
       );
 
@@ -405,6 +445,10 @@ class CashfreeService {
       logger.error({
         error: error.response?.data || error.message,
         transferId,
+        config: {
+          baseUrl: this.payoutConfig?.baseUrl,
+          clientId: this.payoutConfig?.clientId?.substring(0, 10),
+        }
       }, 'Failed to get payout status');
       throw error;
     }
