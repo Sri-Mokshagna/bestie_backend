@@ -104,8 +104,18 @@ router.get('/initiate', async (req: Request, res: Response) => {
       logger.error({ orderId, error }, 'Error getting Cashfree payment status');
       
       // Fallback: try to construct the payment URL directly
-      const config = cashfreeService['config'] || cashfreeService.initializeConfig();
-      const baseUrl = config?.baseUrl || 'https://sandbox.cashfree.com/pg';
+      // Use the same logic as in cashfree.ts but without accessing private methods
+      const appId = process.env.CASHFREE_APP_ID;
+      const secretKey = process.env.CASHFREE_SECRET_KEY;
+      
+      // Check if credentials indicate test mode
+      const isTestMode = appId?.includes('TEST') || 
+                        secretKey?.includes('_test_') ||
+                        secretKey?.includes('test');
+      
+      const baseUrl = isTestMode
+        ? 'https://sandbox.cashfree.com/pg'
+        : 'https://api.cashfree.com/pg';
       
       res.send(`
         <!DOCTYPE html>
