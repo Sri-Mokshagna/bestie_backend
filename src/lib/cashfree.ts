@@ -23,12 +23,21 @@ class CashfreeService {
 
   private initializeConfig() {
     if (!this.config) {
+      // Determine if we're in test mode based on credentials format
+      const appId = process.env.CASHFREE_APP_ID;
+      const secretKey = process.env.CASHFREE_SECRET_KEY;
+      
+      // Check if credentials indicate test mode
+      const isTestMode = appId?.includes('TEST') || 
+                        secretKey?.includes('_test_') ||
+                        secretKey?.includes('test');
+      
       this.config = {
-        appId: process.env.CASHFREE_APP_ID!,
-        secretKey: process.env.CASHFREE_SECRET_KEY!,
-        baseUrl: process.env.NODE_ENV === 'production'
-          ? 'https://api.cashfree.com/pg'
-          : 'https://sandbox.cashfree.com/pg',
+        appId: appId!,
+        secretKey: secretKey!,
+        baseUrl: isTestMode
+          ? 'https://sandbox.cashfree.com/pg'
+          : 'https://api.cashfree.com/pg',
         webhookSecret: process.env.CASHFREE_WEBHOOK_SECRET!,
       };
 
