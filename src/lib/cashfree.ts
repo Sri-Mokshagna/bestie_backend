@@ -295,11 +295,9 @@ class CashfreeService {
       }
 
       // Prepare order payload
-      // Build return URL properly - append order_id using correct query separator
-      const returnUrlBase = orderData.returnUrl;
-      const returnUrlSeparator = returnUrlBase.includes('?') ? '&' : '?';
-      const fullReturnUrl = `${returnUrlBase}${returnUrlSeparator}order_id={order_id}`;
-
+      // NOTE: Do NOT include return_url when using direct redirect to checkout
+      // Cashfree invalidates sessions opened via redirect when return_url is present
+      // Handle post-payment via webhook + polling instead
       const payload = {
         order_id: orderData.orderId,
         order_amount: orderData.amount,
@@ -311,7 +309,7 @@ class CashfreeService {
           customer_phone: phone,
         },
         order_meta: {
-          return_url: fullReturnUrl,
+          // Only notify_url - NO return_url to allow direct redirect
           notify_url: orderData.notifyUrl,
         },
         order_tags: {

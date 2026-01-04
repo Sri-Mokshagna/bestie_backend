@@ -104,9 +104,15 @@ export class PaymentService {
         hasSessionId: !!result.order.payment_session_id,
       }, '✅ Payment order created successfully');
 
+      // Log the payment link for debugging
+      logger.info({ orderId, paymentLink: result.payment_link }, 'Payment link generated');
+
       return {
         orderId,
-        paymentLink: result.payment_link,
+        // Return DIRECT Cashfree checkout URL - app should open this immediately
+        paymentLink: result.direct_checkout_url,
+        // Also provide our redirect URL as fallback
+        redirectUrl: result.payment_link,
         linkId: result.link_id,
         amount: plan.priceINR,
         coins: plan.coins,
