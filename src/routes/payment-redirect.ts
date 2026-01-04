@@ -391,18 +391,13 @@ function renderPaymentPage(options: {
 }): string {
   const { orderId, paymentSessionId, environment, amount, planName } = options;
   
-  // Cashfree SDK URLs
-  const cashfreeSdkUrl = environment === 'production' 
-    ? 'https://sdk.cashfree.com/js/v3/cashfree.js'
-    : 'https://sdk.cashfree.com/js/v3/cashfree.js';
-  
-  // Fallback hosted checkout URL
+  // Direct Cashfree hosted checkout URL - most reliable approach
   const cashfreeBaseUrl = environment === 'production' 
     ? 'https://payments.cashfree.com/order' 
     : 'https://payments-test.cashfree.com/order';
-  const fallbackCheckoutUrl = `${cashfreeBaseUrl}/#${paymentSessionId}`;
+  const checkoutUrl = `${cashfreeBaseUrl}/#${paymentSessionId}`;
   
-  // Server URL for return
+  // Server URL for deep link
   const serverUrl = process.env.SERVER_URL || 'https://bestie-backend-zmj2.onrender.com';
   
   return `
@@ -412,7 +407,6 @@ function renderPaymentPage(options: {
       <title>Complete Payment - Bestie</title>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <script src="${cashfreeSdkUrl}"></script>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -464,10 +458,6 @@ function renderPaymentPage(options: {
           transform: translateY(-2px);
           box-shadow: 0 4px 20px rgba(0,0,0,0.2);
         }
-        .pay-btn:disabled {
-          opacity: 0.7;
-          cursor: not-allowed;
-        }
         .secure-badge {
           display: flex;
           align-items: center;
@@ -483,16 +473,8 @@ function renderPaymentPage(options: {
           fill: currentColor;
         }
         .status {
-          margin-top: 1rem;
+          margin-top: 1.5rem;
           font-size: 0.9rem;
-          opacity: 0.9;
-        }
-        .error {
-          color: #ff6b6b;
-          background: rgba(255,255,255,0.1);
-          padding: 1rem;
-          border-radius: 8px;
-          margin-top: 1rem;
         }
         .spinner {
           width: 24px;
@@ -508,6 +490,7 @@ function renderPaymentPage(options: {
         @keyframes spin {
           to { transform: rotate(360deg); }
         }
+        .hidden { display: none; }
       </style>
     </head>
     <body>
@@ -517,9 +500,7 @@ function renderPaymentPage(options: {
         <div class="amount">₹${amount}</div>
         <div class="plan-name">${planName}</div>
         
-        <button class="pay-btn" id="pay-btn" onclick="initiatePayment()">
-          Pay Now
-        </button>
+        <a href="${checkoutUrl}" class="pay-btn" id="payBtn">Pay Now</a>
         
         <div class="status" id="status"></div>
         
@@ -532,88 +513,19 @@ function renderPaymentPage(options: {
       </div>
       
       <script>
-        const paymentSessionId = '${paymentSessionId}';
-        const environment = '${environment}';
-        const orderId = '${orderId}';
-        const serverUrl = '${serverUrl}';
-        const fallbackUrl = '${fallbackCheckoutUrl}';
-        
-        let cashfree = null;
-        let sdkLoaded = false;
-        
-        // Initialize Cashfree SDK
-        function initCashfree() {
-          try {
-            if (typeof Cashfree !== 'undefined') {
-              cashfree = Cashfree({ mode: environment === 'production' ? 'production' : 'sandbox' });
-              sdkLoaded = true;
-              console.log('Cashfree SDK initialized successfully');
-            } else {
-              console.error('Cashfree SDK not loaded');
-            }
-          } catch (e) {
-            console.error('Failed to initialize Cashfree SDK:', e);
-          }
-        }
-        
-        // Try to init SDK after page load
-        window.addEventListener('load', function() {
-          setTimeout(initCashfree, 500);
+        // Show loading state when clicking pay
+        document.getElementById('payBtn').addEventListener('click', function(e) {
+          document.getElementById('status').innerHTML = '<span class="spinner"></span> Redirecting to Cashfree...';
+          this.classList.add('hidden');
         });
         
-        async function initiatePayment() {
-          const btn = document.getElementById('pay-btn');
-          const status = document.getElementById('status');
-          
-          btn.disabled = true;
-          btn.innerHTML = '<span class="spinner"></span> Processing...';
-          status.innerHTML = 'Initializing payment...';
-          
-          // Method 1: Try Cashfree SDK (Drop)
-          if (sdkLoaded && cashfree) {
-            try {
-              status.innerHTML = 'Opening payment window...';
-              
-              const checkoutOptions = {
-                paymentSessionId: paymentSessionId,
-                redirectTarget: '_self',
-              };
-              
-              const result = await cashfree.checkout(checkoutOptions);
-              
-              if (result.error) {
-                console.error('Payment error:', result.error);
-                status.innerHTML = '<div class="error">Payment failed: ' + result.error.message + '</div>';
-                // Fall back to direct redirect
-                setTimeout(() => useFallback(), 2000);
-              } else if (result.redirect) {
-                status.innerHTML = 'Redirecting to payment page...';
-              } else if (result.paymentDetails) {
-                // Payment completed
-                window.location.href = serverUrl + '/payment/success?orderId=' + orderId;
-              }
-            } catch (e) {
-              console.error('SDK checkout error:', e);
-              status.innerHTML = 'SDK error, using fallback...';
-              useFallback();
-            }
-          } else {
-            // Method 2: Direct redirect to Cashfree hosted checkout
-            useFallback();
-          }
-        }
-        
-        function useFallback() {
-          const status = document.getElementById('status');
-          status.innerHTML = '<span class="spinner"></span> Redirecting to Cashfree...';
-          console.log('Using fallback URL:', fallbackUrl);
-          window.location.href = fallbackUrl;
-        }
-        
-        // Auto-trigger payment after 2 seconds
+        // Auto-redirect after 2 seconds
         setTimeout(function() {
-          if (!document.getElementById('pay-btn').disabled) {
-            initiatePayment();
+          var btn = document.getElementById('payBtn');
+          if (btn && !btn.classList.contains('hidden')) {
+            document.getElementById('status').innerHTML = '<span class="spinner"></span> Redirecting to Cashfree...';
+            btn.classList.add('hidden');
+            window.location.href = '${checkoutUrl}';
           }
         }, 2000);
       </script>
