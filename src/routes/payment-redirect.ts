@@ -40,42 +40,13 @@ router.get('/initiate', async (req: Request, res: Response) => {
       secretKey?.includes('_test_') ||
       secretKey?.includes('test');
 
-    const baseUrl = isTestMode
-      ? 'https://sandbox.cashfree.com/pg'
-      : 'https://api.cashfree.com/pg';
-
     logger.info({
       orderId,
       paymentSessionId: paymentSessionId.substring(0, 20) + '...',
       environment: isTestMode ? 'sandbox' : 'production'
-    }, 'Redirecting to Cashfree payment page');
+    }, 'Serving SDK-based payment page');
 
-    // Get the Cashfree order details to check status
-    try {
-      const cashfreeStatus = await cashfreeService.getPaymentStatus(orderId);
-
-      // If payment is already processed, redirect to appropriate page
-      if (cashfreeStatus.order_status && cashfreeStatus.order_status !== 'ACTIVE') {
-        const redirectUrl = cashfreeStatus.order_status === 'PAID'
-          ? `/payment/success?orderId=${orderId}`
-          : `/payment/failure?orderId=${orderId}`;
-        return res.redirect(redirectUrl);
-      }
-    } catch (error) {
-      logger.warn({ orderId, error }, 'Could not check payment status, proceeding with payment initiation');
-    }
-
-    // Create a mobile-friendly payment page
-    // Use iframe embedding for better mobile compatibility
-    logger.info({
-      orderId,
-      paymentSessionId: paymentSessionId.substring(0, 20) + '...',
-      environment: isTestMode ? 'sandbox' : 'production'
-    }, 'Serving payment page');
-
-    // Construct the Cashfree checkout URL that can be used in iframe
-    const cashfreeCheckoutUrl = `${baseUrl}/checkout?payment_session_id=${paymentSessionId}`;
-
+    // Send payment page with Cashfree SDK
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -83,6 +54,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
         <title>Complete Payment</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
         <style>
           * {
             margin: 0;
@@ -91,41 +63,67 @@ router.get('/initiate', async (req: Request, res: Response) => {
           }
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             display: flex;
-            flex-direction: column;
-          }
-          .header {
-            background: white;
+            align-items: center;
+            justify-content: center;
             padding: 1rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          }
+          .container {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
             text-align: center;
           }
-          .header h1 {
-            font-size: 1.2rem;
+          .icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+          }
+          h1 {
+            font-size: 1.5rem;
             color: #333;
             margin-bottom: 0.5rem;
           }
-          .header p {
+          .status {
+            font-size: 0.95rem;
+            color: #666;
+            margin-bottom: 1.5rem;
+            min-height: 1.5rem;
+          }
+          .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 1.5rem auto;
+          }
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          .order-info {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
             font-size: 0.85rem;
             color: #666;
           }
-          .iframe-container {
-            flex: 1;
-            position: relative;
-            overflow: hidden;
-          }
-          iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-          }
-          .alt-action {
+          .error-box {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
             padding: 1rem;
-            background: white;
-            text-align: center;
-            border-top: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin: 1rem 0;
+            display: none;
+            font-size: 0.9rem;
           }
           .button {
             display: inline-block;
@@ -133,66 +131,114 @@ router.get('/initiate', async (req: Request, res: Response) => {
             background: #667eea;
             color: white;
             text-decoration: none;
+            border: none;
             border-radius: 8px;
             font-weight: 600;
-            border: none;
             cursor: pointer;
             font-size: 1rem;
+            margin-top: 1rem;
+            transition: opacity 0.2s;
           }
           .button:active {
             opacity: 0.8;
           }
-          .order-id {
-            margin-top: 0.5rem;
-            font-size: 0.75rem;
-            color: #999;
-          }
         </style>
       </head>
       <body>
-        <div class="header">
-          <h1>🔒 Secure Payment</h1>
-          <p>Please complete your payment below</p>
-          <div class="order-id">Order ID: ${orderId}</div>
-        </div>
-
-        <div class="iframe-container" id="paymentFrame">
-          <iframe
-            id="cashfreeFrame"
-            src="${cashfreeCheckoutUrl}"
-            allow="payment"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-top-navigation allow-popups"
-            loading="eager">
-          </iframe>
-        </div>
-
-        <div class="alt-action">
-          <p style="font-size: 0.85rem; color: #666; margin-bottom: 0.75rem;">
-            Having trouble? Try opening in browser
-          </p>
-          <a href="${cashfreeCheckoutUrl}" class="button" target="_blank" rel="noopener">
-            Open in Browser
-          </a>
+        <div class="container">
+          <div class="icon" id="icon">🔒</div>
+          <h1 id="title">Initializing Payment</h1>
+          <div class="status" id="status">Please wait while we set up your secure payment...</div>
+          <div class="spinner" id="spinner"></div>
+          <div class="order-info">
+            <strong>Order ID:</strong> ${orderId}
+          </div>
+          <div class="error-box" id="error"></div>
+          <button class="button" id="retryBtn" onclick="initPayment()" style="display: none;">
+            Retry Payment
+          </button>
         </div>
 
         <script>
-          // Handle iframe load errors
-          const iframe = document.getElementById('cashfreeFrame');
-          const timeout = setTimeout(function() {
-            // If iframe hasn't loaded after 10 seconds, suggest browser
-            console.warn('Iframe loading timeout');
-          }, 10000);
-
-          iframe.onload = function() {
-            clearTimeout(timeout);
-            console.log('Payment frame loaded successfully');
-          };
-
-          iframe.onerror = function() {
-            clearTimeout(timeout);
-            console.error('Failed to load payment frame');
-            alert('Please click "Open in Browser" button below to complete payment');
-          };
+          const SESSION_ID = "${paymentSessionId}";
+          const MODE = "${isTestMode ? 'sandbox' : 'production'}";
+          let attempting = false;
+          
+          function updateUI(icon, title, status, showSpinner, showError, errorMsg) {
+            document.getElementById('icon').textContent = icon;
+            document.getElementById('title').textContent = title;
+            document.getElementById('status').textContent = status;
+            document.getElementById('spinner').style.display = showSpinner ? 'block' : 'none';
+            document.getElementById('error').style.display = showError ? 'block' : 'none';
+            if (showError && errorMsg) {
+              document.getElementById('error').innerHTML = errorMsg;
+            }
+          }
+          
+          function showRetry() {
+            document.getElementById('retryBtn').style.display = 'inline-block';
+          }
+          
+          function hideRetry() {
+            document.getElementById('retryBtn').style.display = 'none';
+          }
+          
+          function initPayment() {
+            if (attempting) return;
+            attempting = true;
+            hideRetry();
+            updateUI('🔒', 'Initializing Payment', 'Loading Cashfree payment gateway...', true, false);
+            
+            setTimeout(function() {
+              try {
+                if (typeof Cashfree === 'undefined') {
+                  throw new Error('Payment gateway SDK failed to load. Please check your internet connection.');
+                }
+                
+                updateUI('💳', 'Loading Payment Gateway', 'Connecting to secure payment system...', true, false);
+                
+                const cashfree = Cashfree({ mode: MODE });
+                
+                updateUI('💳', 'Redirecting to Payment', 'Please wait, redirecting to payment page...', true, false);
+                
+                cashfree.checkout({
+                  paymentSessionId: SESSION_ID,
+                  redirectTarget: "_self"
+                }).then(function(result) {
+                  if (result.error) {
+                    console.error('Cashfree error:', result.error);
+                    const errMsg = result.error.message || 'Failed to initialize payment';
+                    updateUI('❌', 'Payment Failed', '', false, true, 
+                      '<strong>Error:</strong> ' + errMsg + 
+                      '<br><small>Please try again or contact support if the issue persists.</small>');
+                    showRetry();
+                    attempting = false;
+                  } else if (result.redirect) {
+                    updateUI('✓', 'Redirecting...', 'Taking you to the payment page now', true, false);
+                  }
+                }).catch(function(error) {
+                  console.error('Checkout error:', error);
+                  updateUI('❌', 'Payment Failed', '', false, true,
+                    '<strong>Error:</strong> ' + (error.message || 'Unknown error') +
+                    '<br><small>Please try again.</small>');
+                  showRetry();
+                  attempting = false;
+                });
+              } catch (error) {
+                console.error('Exception:', error);
+                updateUI('❌', 'Payment Failed', '', false, true,
+                  '<strong>Error:</strong> ' + error.message +
+                  '<br><small>Please try again or contact support.</small>');
+                showRetry();
+                attempting = false;
+              }
+            }, 1000);
+          }
+          
+          // Auto-start after page loads
+          window.addEventListener('load', function() {
+            setTimeout(initPayment, 500);
+          });
         </script>
       </body>
       </html>
@@ -203,20 +249,15 @@ router.get('/initiate', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * Payment redirect handler
- * This endpoint receives the redirect from Cashfree and redirects to the mobile app deep link
- */
+// Success and failure routes remain the same as in original file
 router.get('/success', (req: Request, res: Response) => {
   try {
     const { orderId } = req.query;
 
     logger.info({ orderId }, 'Payment redirect - success');
 
-    // Redirect to mobile app deep link
     const deepLink = `bestie://payment/success?orderId=${orderId || ''}`;
 
-    // Send HTML that redirects to deep link and shows a fallback message
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -264,7 +305,7 @@ router.get('/success', (req: Request, res: Response) => {
               transition: transform 0.2s;
             }
             .button:hover {
-              transform: scale(1.05);
+              transform: scale(1 .05);
             }
             .footer {
               position: fixed;
@@ -291,7 +332,6 @@ router.get('/success', (req: Request, res: Response) => {
             &copy; 2025 Varshith Vegetables and Fruits Private Limited. All rights reserved.
           </div>
           <script>
-            // Attempt automatic redirect
             setTimeout(() => {
               window.location.href = '${deepLink}';
             }, 1000);
@@ -311,7 +351,6 @@ router.get('/failure', (req: Request, res: Response) => {
 
     logger.info({ orderId }, 'Payment redirect - failure');
 
-    // Redirect to mobile app deep link
     const deepLink = `bestie://payment/failure?orderId=${orderId || ''}`;
 
     res.send(`
@@ -388,7 +427,6 @@ router.get('/failure', (req: Request, res: Response) => {
             &copy; 2025 Varshith Vegetables and Fruits Private Limited. All rights reserved.
           </div>
           <script>
-            // Attempt automatic redirect
             setTimeout(() => {
               window.location.href = '${deepLink}';
             }, 1000);
