@@ -1,9 +1,86 @@
 import { Router, Request, Response } from 'express';
 import { Payment, PaymentStatus } from '../models/Payment';
+import { User } from '../models/User';
+import { CoinPlan } from '../models/CoinPlan';
 import { logger } from '../lib/logger';
 import { cashfreeService } from '../lib/cashfree';
 
 const router = Router();
+
+/**
+ * Helper function to recreate a payment session when the original expires
+ * Creates a new Cashfree order with the same details
+ */
+async function recreatePaymentSession(payment: any): Promise<string | null> {
+  try {
+    // Fetch user and plan details
+    const user = await User.findById(payment.userId);
+    if (!user) {
+      logger.error({ userId: payment.userId }, 'User not found for payment session recreation');
+      return null;
+    }
+
+    // Get plan details if available
+    let planName = 'Coin Pack';
+    if (payment.planId) {
+      const plan = await CoinPlan.findById(payment.planId);
+      if (plan) {
+        planName = plan.name;
+      }
+    }
+
+    const serverUrl = process.env.SERVER_URL || 
+      (process.env.NODE_ENV === 'production' 
+        ? 'https://bestie-backend-zmj2.onrender.com' 
+        : 'http://localhost:3000');
+
+    // Generate customer email
+    const customerEmail = user.profile?.email || `user_${user.phone?.replace(/\+/g, '')}@bestie.app`;
+
+    // Create a new order with Cashfree using the same order ID
+    // Note: We use a new order ID since Cashfree doesn't allow reusing order IDs
+    const newOrderId = `${payment.orderId}_R${Date.now().toString(36)}`;
+
+    logger.info({ 
+      originalOrderId: payment.orderId, 
+      newOrderId,
+      amount: payment.amount 
+    }, 'Creating new Cashfree order for expired session');
+
+    const result = await cashfreeService.createOrderAndGetLink({
+      orderId: newOrderId,
+      amount: payment.amount,
+      currency: 'INR',
+      customerDetails: {
+        customerId: payment.userId.toString(),
+        customerName: user.profile?.name || 'Bestie User',
+        customerEmail,
+        customerPhone: user.phone || '',
+      },
+      returnUrl: `${serverUrl}/payment/success?orderId=${payment.orderId}`,
+      notifyUrl: `${serverUrl}/api/payments/webhook`,
+    });
+
+    // Update payment record with new session info
+    payment.cashfreeOrderId = result.order.order_id;
+    payment.gatewayResponse = result.order;
+    await payment.save();
+
+    logger.info({ 
+      orderId: payment.orderId,
+      newCashfreeOrderId: result.order.order_id,
+      hasSessionId: !!result.order.payment_session_id 
+    }, 'Successfully recreated payment session');
+
+    return result.order.payment_session_id;
+  } catch (error: any) {
+    logger.error({ 
+      error: error.message, 
+      orderId: payment.orderId 
+    }, 'Failed to recreate payment session');
+    return null;
+  }
+}
 
 /**
  * Payment Initiation Page
@@ -46,26 +123,46 @@ router.get('/initiate', async (req: Request, res: Response) => {
     }
 
     // Get the payment session ID from gateway response
-    const paymentSessionId = payment.gatewayResponse?.payment_session_id;
+    let paymentSessionId = payment.gatewayResponse?.payment_session_id;
 
+    // If no session ID, try to refresh or recreate
     if (!paymentSessionId) {
-      logger.error({ orderId, gatewayResponse: payment.gatewayResponse }, 'Payment session ID not found');
+      logger.warn({ orderId, gatewayResponse: payment.gatewayResponse }, 'Payment session ID not found - attempting to recover');
       
-      // Try to refresh the order status from Cashfree
+      // Try to get fresh session from Cashfree
       try {
         const orderStatus = await cashfreeService.getPaymentStatus(orderId);
         if (orderStatus?.payment_session_id) {
-          // Update the payment record with the session ID
           payment.gatewayResponse = { ...payment.gatewayResponse, ...orderStatus };
           await payment.save();
-          
-          // Redirect to self to use the new session ID
-          return res.redirect(`/payment/initiate?orderId=${orderId}`);
+          paymentSessionId = orderStatus.payment_session_id;
+          logger.info({ orderId }, 'Recovered payment session from Cashfree');
+        } else if (orderStatus?.order_status === 'EXPIRED' || orderStatus?.order_status === 'TERMINATED') {
+          // Order expired, need to create a new one
+          logger.info({ orderId, status: orderStatus.order_status }, 'Order expired - creating new order');
+          const newSessionId = await recreatePaymentSession(payment);
+          if (newSessionId) {
+            paymentSessionId = newSessionId;
+          }
         }
-      } catch (err) {
-        logger.error({ err, orderId }, 'Failed to refresh payment session');
+      } catch (err: any) {
+        logger.error({ err: err.message, orderId }, 'Failed to refresh payment session from Cashfree');
+        
+        // If Cashfree lookup failed, try to create a new order
+        try {
+          const newSessionId = await recreatePaymentSession(payment);
+          if (newSessionId) {
+            paymentSessionId = newSessionId;
+          }
+        } catch (recreateErr: any) {
+          logger.error({ err: recreateErr.message, orderId }, 'Failed to recreate payment session');
+        }
       }
-      
+    }
+
+    // Final check - if still no session, show error
+    if (!paymentSessionId) {
+      logger.error({ orderId }, 'Unable to obtain valid payment session');
       return res.status(500).send(renderErrorPage(
         'Payment Session Expired',
         'Your payment session has expired or is invalid. Please go back to the app and try again.'

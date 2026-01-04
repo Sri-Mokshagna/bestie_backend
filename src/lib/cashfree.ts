@@ -295,6 +295,11 @@ class CashfreeService {
       }
 
       // Prepare order payload
+      // Build return URL properly - append order_id using correct query separator
+      const returnUrlBase = orderData.returnUrl;
+      const returnUrlSeparator = returnUrlBase.includes('?') ? '&' : '?';
+      const fullReturnUrl = `${returnUrlBase}${returnUrlSeparator}order_id={order_id}`;
+
       const payload = {
         order_id: orderData.orderId,
         order_amount: orderData.amount,
@@ -306,7 +311,7 @@ class CashfreeService {
           customer_phone: phone,
         },
         order_meta: {
-          return_url: `${orderData.returnUrl}?order_id={order_id}`,
+          return_url: fullReturnUrl,
           notify_url: orderData.notifyUrl,
         },
         order_tags: {
