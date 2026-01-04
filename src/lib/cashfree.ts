@@ -26,12 +26,12 @@ class CashfreeService {
       // Determine if we're in test mode based on credentials format
       const appId = process.env.CASHFREE_APP_ID;
       const secretKey = process.env.CASHFREE_SECRET_KEY;
-      
+
       // Check if credentials indicate test mode
-      const isTestMode = appId?.includes('TEST') || 
-                        secretKey?.includes('_test_') ||
-                        secretKey?.includes('test');
-      
+      const isTestMode = appId?.includes('TEST') ||
+        secretKey?.includes('_test_') ||
+        secretKey?.includes('test');
+
       this.config = {
         appId: appId!,
         secretKey: secretKey!,
@@ -200,25 +200,38 @@ class CashfreeService {
 
       const config = this.initializeConfig();
 
-      // Step 1: Create order
       const orderResponse = await axios.post(
         `${config.baseUrl}/orders`,
         payload,
         { headers: this.getHeaders() }
       );
 
-      logger.info({ orderId: orderData.orderId }, 'Cashfree order created');
+      logger.info({
+        orderId: orderData.orderId,
+        orderResponseKeys: Object.keys(orderResponse.data)
+      }, 'Cashfree order created');
 
-      // For mobile apps, we return a server-side payment page URL
-      // This page will handle the Cashfree payment flow
-      const paymentUrl = `${process.env.SERVER_URL || 'http://localhost:3000'}/payment/initiate?orderId=${orderData.orderId}`;
+      // Check if Cashfree provides a direct payment link
+      // Newer API versions may include payment_link in the response
+      const directPaymentLink = orderResponse.data.payment_link ||
+        orderResponse.data.paymentLink ||
+        orderResponse.data.payment_url;
 
-      logger.info({ orderId: orderData.orderId, paymentUrl }, 'Payment URL generated');
+      // For mobile apps, prefer direct payment link if available
+      // Otherwise use our server-side payment page
+      const paymentUrl = directPaymentLink ||
+        `${process.env.SERVER_URL || 'http://localhost:3000'}/payment/initiate?orderId=${orderData.orderId}`;
+
+      logger.info({
+        orderId: orderData.orderId,
+        paymentUrl: paymentUrl.substring(0, 60) + '...',
+        usingDirectLink: !!directPaymentLink
+      }, 'Payment URL generated');
 
       return {
         order: orderResponse.data,
-        payment_link: paymentUrl, // Return the payment URL directly
-        link_id: orderData.orderId, // Use order ID as link ID
+        payment_link: paymentUrl,
+        link_id: orderData.orderId,
       };
     } catch (error: any) {
       logger.error({
@@ -265,7 +278,7 @@ class CashfreeService {
         Buffer.from(signature),
         Buffer.from(expectedSignature)
       );
-      
+
       if (!isValid) {
         logger.error({
           receivedSignature: signature,
@@ -333,7 +346,7 @@ class CashfreeService {
       const response = await axios.post(
         `${config.baseUrl}/addBeneficiary`,
         payload,
-        { 
+        {
           headers,
           timeout: 15000, // 15 second timeout for payout operations
         }
@@ -382,7 +395,7 @@ class CashfreeService {
       const response = await axios.post(
         `${config.baseUrl}/requestTransfer`,
         payload,
-        { 
+        {
           headers,
           timeout: 15000, // 15 second timeout for payout operations
         }

@@ -65,143 +65,134 @@ router.get('/initiate', async (req: Request, res: Response) => {
       logger.warn({ orderId, error }, 'Could not check payment status, proceeding with payment initiation');
     }
 
-    // Use Cashfree SDK to initiate checkout with the payment session ID
-    // This is the correct approach as per Cashfree documentation
+    // Create a mobile-friendly payment page
+    // Use iframe embedding for better mobile compatibility
     logger.info({
       orderId,
       paymentSessionId: paymentSessionId.substring(0, 20) + '...',
       environment: isTestMode ? 'sandbox' : 'production'
-    }, 'Initiating Cashfree checkout with SDK');
+    }, 'Serving payment page');
+
+    // Construct the Cashfree checkout URL that can be used in iframe
+    const cashfreeCheckoutUrl = `${baseUrl}/checkout?payment_session_id=${paymentSessionId}`;
 
     res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Processing Payment...</title>
+        <title>Complete Payment</title>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
             display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            flex-direction: column;
           }
-          .container {
-            text-align: center;
-            padding: 2rem;
-            max-width: 400px;
-          }
-          .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-            margin: 0 auto 1rem;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-          h1 {
-            margin: 0 0 1rem 0;
-            font-size: 1.5rem;
-          }
-          p {
-            margin: 0.5rem 0;
-            opacity: 0.9;
-            font-size: 0.9rem;
-          }
-          .error {
-            background: rgba(255, 0, 0, 0.3);
+          .header {
+            background: white;
             padding: 1rem;
-            border-radius: 8px;
-            margin-top: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+          }
+          .header h1 {
+            font-size: 1.2rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+          }
+          .header p {
             font-size: 0.85rem;
-            display: none;
+            color: #666;
+          }
+          .iframe-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+          }
+          iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+          }
+          .alt-action {
+            padding: 1rem;
+            background: white;
+            text-align: center;
+            border-top: 1px solid #e0e0e0;
           }
           .button {
             display: inline-block;
-            margin-top: 1rem;
             padding: 0.75rem 2rem;
-            background: white;
-            color: #667eea;
+            background: #667eea;
+            color: white;
             text-decoration: none;
-            border: none;
             border-radius: 8px;
             font-weight: 600;
+            border: none;
             cursor: pointer;
-            transition: transform 0.2s;
+            font-size: 1rem;
           }
-          .button:hover {
-            transform: scale(1.05);
+          .button:active {
+            opacity: 0.8;
+          }
+          .order-id {
+            margin-top: 0.5rem;
+            font-size: 0.75rem;
+            color: #999;
           }
         </style>
       </head>
       <body>
-        <div class="container">
-          <div class="spinner" id="spinner"></div>
-          <h1 id="title">Redirecting to Payment Gateway</h1>
-          <p id="message">Please wait while we set up your secure payment...</p>
-          <p style="font-size: 0.8rem; opacity: 0.7;">Order ID: ${orderId}</p>
-          <div id="error" class="error"></div>
-          <button id="retryBtn" class="button" style="display: none;" onclick="initPayment()">Retry Payment</button>
+        <div class="header">
+          <h1>🔒 Secure Payment</h1>
+          <p>Please complete your payment below</p>
+          <div class="order-id">Order ID: ${orderId}</div>
         </div>
+
+        <div class="iframe-container" id="paymentFrame">
+          <iframe
+            id="cashfreeFrame"
+            src="${cashfreeCheckoutUrl}"
+            allow="payment"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-top-navigation allow-popups"
+            loading="eager">
+          </iframe>
+        </div>
+
+        <div class="alt-action">
+          <p style="font-size: 0.85rem; color: #666; margin-bottom: 0.75rem;">
+            Having trouble? Try opening in browser
+          </p>
+          <a href="${cashfreeCheckoutUrl}" class="button" target="_blank" rel="noopener">
+            Open in Browser
+          </a>
+        </div>
+
         <script>
-          const PAYMENT_SESSION_ID = "${paymentSessionId}";
-          const MODE = "${isTestMode ? 'sandbox' : 'production'}";
-          
-          function showError(msg) {
-            document.getElementById('spinner').style.display = 'none';
-            document.getElementById('title').textContent = 'Payment Initialization Failed';
-            document.getElementById('message').textContent = '';
-            document.getElementById('error').style.display = 'block';
-            document.getElementById('error').innerHTML = msg;
-            document.getElementById('retryBtn').style.display = 'inline-block';
-          }
-          
-          function initPayment() {
-            document.getElementById('spinner').style.display = 'block';
-            document.getElementById('error').style.display = 'none';
-            document.getElementById('retryBtn').style.display = 'none';
-            document.getElementById('title').textContent = 'Redirecting to Payment Gateway';
-            document.getElementById('message').textContent = 'Please wait while we set up your secure payment...';
-            
-            try {
-              if (typeof Cashfree === 'undefined') {
-                showError('Payment gateway SDK failed to load. Please check your internet connection and try again.');
-                return;
-              }
-              
-              const cashfree = Cashfree({ mode: MODE });
-              
-              cashfree.checkout({
-                paymentSessionId: PAYMENT_SESSION_ID,
-                redirectTarget: "_self"
-              }).then(function(result) {
-                if (result.error) {
-                  console.error('Cashfree error:', result.error);
-                  showError('Payment initialization failed: ' + (result.error.message || 'Unknown error'));
-                }
-                // If redirect is successful, the page will navigate away
-              }).catch(function(error) {
-                console.error('Checkout error:', error);
-                showError('Failed to initialize payment. Please try again.<br><small>' + error.message + '</small>');
-              });
-            } catch (error) {
-              console.error('Exception:', error);
-              showError('An unexpected error occurred. Please try again.<br><small>' + error.message + '</small>');
-            }
-          }
-          
-          // Start payment initialization after a short delay to ensure SDK is loaded
-          setTimeout(initPayment, 500);
+          // Handle iframe load errors
+          const iframe = document.getElementById('cashfreeFrame');
+          const timeout = setTimeout(function() {
+            // If iframe hasn't loaded after 10 seconds, suggest browser
+            console.warn('Iframe loading timeout');
+          }, 10000);
+
+          iframe.onload = function() {
+            clearTimeout(timeout);
+            console.log('Payment frame loaded successfully');
+          };
+
+          iframe.onerror = function() {
+            clearTimeout(timeout);
+            console.error('Failed to load payment frame');
+            alert('Please click "Open in Browser" button below to complete payment');
+          };
         </script>
       </body>
       </html>
