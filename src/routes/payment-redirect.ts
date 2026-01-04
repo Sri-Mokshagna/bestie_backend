@@ -164,7 +164,14 @@ router.get('/initiate', async (req: Request, res: Response) => {
           const MODE = "${isTestMode ? 'sandbox' : 'production'}";
           let attempting = false;
           
+          // Log to console for debugging
+          console.log('Payment page loaded');
+          console.log('Session ID:', SESSION_ID.substring(0, 20) + '...');
+          console.log('Mode:', MODE);
+          console.log('Cashfree SDK loaded:', typeof Cashfree !== 'undefined');
+          
           function updateUI(icon, title, status, showSpinner, showError, errorMsg) {
+            console.log('UI Update:', { icon, title, status, showError });
             document.getElementById('icon').textContent = icon;
             document.getElementById('title').textContent = title;
             document.getElementById('status').textContent = status;
@@ -184,61 +191,86 @@ router.get('/initiate', async (req: Request, res: Response) => {
           }
           
           function initPayment() {
-            if (attempting) return;
+            if (attempting) {
+              console.log('Already attempting payment, skipping');
+              return;
+            }
             attempting = true;
             hideRetry();
-            updateUI('🔒', 'Initializing Payment', 'Loading Cashfree payment gateway...', true, false);
             
-            setTimeout(function() {
-              try {
-                if (typeof Cashfree === 'undefined') {
-                  throw new Error('Payment gateway SDK failed to load. Please check your internet connection.');
-                }
+            console.log('Starting payment initialization...');
+            updateUI('🔒', 'Initializing Payment', 'Checking Cashfree SDK...', true, false);
+            
+            try {
+              console.log('Checking if Cashfree SDK is available...');
+              if (typeof Cashfree === 'undefined') {
+                console.error('Cashfree SDK is not defined!');
+                throw new Error('Payment gateway SDK failed to load. Please refresh and try again.');
+              }
+              
+              console.log('Cashfree SDK found, creating instance...');
+              updateUI('💳', 'Connecting to Gateway', 'Initializing secure payment system...', true, false);
+              
+              const cashfree = Cashfree({ mode: MODE });
+              console.log('Cashfree instance created:', cashfree);
+              
+              updateUI('💳', 'Starting Payment', 'Redirecting to payment page...', true, false);
+              console.log('Calling cashfree.checkout with session:', SESSION_ID.substring(0, 20) + '...');
+              
+              cashfree.checkout({
+                paymentSessionId: SESSION_ID,
+                redirectTarget: "_self"
+              }).then(function(result) {
+                console.log('Checkout promise resolved:', result);
                 
-                updateUI('💳', 'Loading Payment Gateway', 'Connecting to secure payment system...', true, false);
-                
-                const cashfree = Cashfree({ mode: MODE });
-                
-                updateUI('💳', 'Redirecting to Payment', 'Please wait, redirecting to payment page...', true, false);
-                
-                cashfree.checkout({
-                  paymentSessionId: SESSION_ID,
-                  redirectTarget: "_self"
-                }).then(function(result) {
-                  if (result.error) {
-                    console.error('Cashfree error:', result.error);
-                    const errMsg = result.error.message || 'Failed to initialize payment';
-                    updateUI('❌', 'Payment Failed', '', false, true, 
-                      '<strong>Error:</strong> ' + errMsg + 
-                      '<br><small>Please try again or contact support if the issue persists.</small>');
-                    showRetry();
-                    attempting = false;
-                  } else if (result.redirect) {
-                    updateUI('✓', 'Redirecting...', 'Taking you to the payment page now', true, false);
-                  }
-                }).catch(function(error) {
-                  console.error('Checkout error:', error);
-                  updateUI('❌', 'Payment Failed', '', false, true,
-                    '<strong>Error:</strong> ' + (error.message || 'Unknown error') +
-                    '<br><small>Please try again.</small>');
+                if (result.error) {
+                  console.error('Cashfree returned error:', result.error);
+                  const errMsg = result.error.message || result.error.code || 'Failed to initialize payment';
+                  updateUI('❌', 'Payment Failed', '', false, true, 
+                    '<strong>Error:</strong> ' + errMsg + 
+                    '<br><small>Error code: ' + (result.error.code || 'unknown') + '</small>' +
+                    '<br><small>Please contact support if this persists.</small>');
                   showRetry();
                   attempting = false;
-                });
-              } catch (error) {
-                console.error('Exception:', error);
+                } else if (result.redirect) {
+                  console.log('Redirect successful');
+                  updateUI('✓', 'Redirecting...', 'Taking you to payment page', true, false);
+                } else {
+                  console.log('Unexpected result:', result);
+                  updateUI('❓', 'Unexpected Response', '', false, true,
+                    'Received unexpected response from payment gateway. Please try again.');
+                  showRetry();
+                  attempting = false;
+                }
+              }).catch(function(error) {
+                console.error('Checkout promise rejected:', error);
                 updateUI('❌', 'Payment Failed', '', false, true,
-                  '<strong>Error:</strong> ' + error.message +
+                  '<strong>Error:</strong> ' + (error.message || error.toString()) +
                   '<br><small>Please try again or contact support.</small>');
                 showRetry();
                 attempting = false;
-              }
-            }, 1000);
+              });
+            } catch (error) {
+              console.error('Exception during initialization:', error);
+              updateUI('❌', 'Initialization Failed', '', false, true,
+                '<strong>Error:</strong> ' + error.message +
+                '<br><small>Please refresh the page and try again.</small>');
+              showRetry();
+              attempting = false;
+            }
           }
           
-          // Auto-start after page loads
+          // Start immediately when page loads
           window.addEventListener('load', function() {
+            console.log('Window loaded, starting payment in 500ms...');
             setTimeout(initPayment, 500);
           });
+          
+          // Fallback: also try if DOM is already ready
+          if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            console.log('DOM already ready, starting payment in 500ms...');
+            setTimeout(initPayment, 500);
+          }
         </script>
       </body>
       </html>
