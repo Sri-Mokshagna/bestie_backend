@@ -36,58 +36,46 @@ router.get('/initiate', async (req: Request, res: Response) => {
       orderId,
       paymentSessionId: paymentSessionId.substring(0, 20) + '...',
       environment: isTestMode ? 'sandbox' : 'production'
-    }, 'Serving form-based payment page');
-
-    // Cashfree checkout URL
-    const checkoutUrl = isTestMode
-      ? 'https://sandbox.cashfree.com/pg/view/order'
-      : 'https://www.cashfree.com/pg/view/order';
+    }, 'Serving Drop component payment page');
 
     res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Redirecting to Payment</title>
+        <title>Complete Payment</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
         <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #f5f5f5;
             min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0;
-            padding: 1rem;
           }
-          .container {
-            background: white;
-            border-radius: 16px;
-            padding: 2.5rem;
-            max-width: 450px;
-            width: 100%;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+          .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
             text-align: center;
           }
-          .icon {
-            font-size: 3.5rem;
-            margin-bottom: 1.5rem;
-            animation: pulse 1.5s ease-in-out infinite;
+          .header h1 {
+            font-size: 1.3rem;
+            margin-bottom: 0.5rem;
           }
-          @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
+          .header .order-id {
+            font-size: 0.85rem;
+            opacity: 0.9;
           }
-          h1 {
-            font-size: 1.6rem;
-            color: #333;
-            margin-bottom: 1rem;
+          #payment-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            min-height: 400px;
           }
-          .message {
-            font-size: 1rem;
-            color: #666;
-            margin-bottom: 2rem;
+          .loading {
+            text-align: center;
+            padding: 3rem 1rem;
           }
           .spinner {
             width: 50px;
@@ -96,47 +84,96 @@ router.get('/initiate', async (req: Request, res: Response) => {
             border-top: 4px solid #667eea;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin: 1.5rem auto;
+            margin: 0 auto 1rem;
           }
           @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
           }
-          .order-info {
-            background: #f8f9fa;
-            padding: 1rem;
+          .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
+            padding: 1.5rem;
+            margin: 2rem;
             border-radius: 8px;
-            font-size: 0.85rem;
-            color: #666;
-            margin-top: 1.5rem;
+            text-align: center;
+          }
+          .retry-btn {
+            display: inline-block;
+            margin-top: 1rem;
+            padding: 0.75rem 2rem;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
           }
         </style>
       </head>
       <body>
-        <div class="container">
-          <div class="icon">🔒</div>
-          <h1>Redirecting to Secure Payment</h1>
-          <div class="message">Please wait, you'll be redirected to complete your payment...</div>
-          <div class="spinner"></div>
-          <div class="order-info">
-            <strong>Order ID:</strong> ${orderId}
+        <div class="header">
+          <h1>🔒 Secure Payment</h1>
+          <div class="order-id">Order ID: ${orderId}</div>
+        </div>
+
+        <div id="payment-container">
+          <div class="loading">
+            <div class="spinner"></div>
+            <p>Loading payment options...</p>
           </div>
         </div>
 
-        <form id="paymentForm" action="${checkoutUrl}" method="POST" style="display:none;">
-          <input type="hidden" name="payment_session_id" value="${paymentSessionId}">
-          <input type="hidden" name="order_id" value="${orderId}">
-        </form>
-
         <script>
-          console.log('Payment form page loaded');
-          console.log('Session ID:', '${paymentSessionId}'.substring(0, 20) + '...');
-          console.log('Submitting to:', '${checkoutUrl}');
+          const SESSION_ID = "${paymentSessionId}";
+          const MODE = "${isTestMode ? 'sandbox' : 'production'}";
           
-          setTimeout(function() {
-            console.log('Submitting payment form...');
-            document.getElementById('paymentForm').submit();
-          }, 1000);
+          console.log('Payment Drop page loaded');
+          console.log('Session ID:', SESSION_ID.substring(0, 20) + '...');
+          console.log('Mode:', MODE);
+          
+          function showError(msg) {
+            document.getElementById('payment-container').innerHTML = 
+              '<div class="error">' +
+              '<strong>Payment Error</strong><br>' +
+              msg +
+              '<br><button class="retry-btn" onclick="location.reload()">Retry</button>' +
+              '</div>';
+          }
+          
+          window.addEventListener('load', function() {
+            setTimeout(function() {
+              try {
+                if (typeof Cashfree === 'undefined') {
+                  showError('Payment gateway failed to load. Please check your connection and try again.');
+                  return;
+                }
+                
+                console.log('Initializing Cashfree Drop component...');
+                const cashfree = Cashfree({ mode: MODE });
+                
+                const dropConfig = {
+                  paymentSessionId: SESSION_ID,
+                  redirectTarget: "_self"
+                };
+                
+                console.log('Rendering Drop component...');
+                cashfree.drop(document.getElementById("payment-container"), dropConfig)
+                  .then(function(drop) {
+                    console.log('Drop component rendered successfully');
+                  })
+                  .catch(function(error) {
+                    console.error('Drop component error:', error);
+                    showError('Failed to load payment options. ' + (error.message || 'Please try again.'));
+                  });
+                  
+              } catch (error) {
+                console.error('Exception:', error);
+                showError('An unexpected error occurred. Please try again.');
+              }
+            }, 500);
+          });
         </script>
       </body>
       </html>
@@ -152,7 +189,7 @@ router.get('/success', (req: Request, res: Response) => {
   const deepLink = `bestie://payment/success?orderId=${orderId || ''}`;
 
   res.send(`
-    <!DOCTYPE html>
+    <!DOCTYPE HTML>
     <html>
       <head>
         <meta charset="UTF-8">

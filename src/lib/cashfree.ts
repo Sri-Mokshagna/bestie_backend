@@ -180,56 +180,7 @@ class CashfreeService {
     try {
       const config = this.initializeConfig();
 
-      // FIRST: Try to create a Payment Link (generates actual URL, works in mobile)
-      try {
-        logger.info({ orderId: orderData.orderId }, 'Attempting to create Cashfree Payment Link');
-
-        const linkPayload = {
-          link_id: orderData.orderId,
-          link_amount: orderData.amount,
-          link_currency: orderData.currency,
-          link_purpose: `Payment for order ${orderData.orderId}`,
-          customer_details: {
-            customer_phone: orderData.customerDetails.customerPhone,
-            customer_name: orderData.customerDetails.customerName,
-            customer_email: orderData.customerDetails.customerEmail,
-          },
-          link_notify: {
-            send_sms: false,
-            send_email: false,
-          },
-          link_meta: {
-            return_url: orderData.returnUrl,
-            notify_url: orderData.notifyUrl,
-          },
-        };
-
-        const linkResponse = await axios.post(
-          `${config.baseUrl}/links`,
-          linkPayload,
-          { headers: this.getHeaders() }
-        );
-
-        if (linkResponse.data && linkResponse.data.link_url) {
-          logger.info({
-            orderId: orderData.orderId,
-            linkUrl: linkResponse.data.link_url.substring(0, 60) + '...',
-          }, 'Cashfree Payment Link created successfully');
-
-          return {
-            order: linkResponse.data,
-            payment_link: linkResponse.data.link_url,
-            link_id: orderData.orderId,
-          };
-        }
-      } catch (linkError: any) {
-        logger.warn({
-          error: linkError.response?.data || linkError.message,
-          orderId: orderData.orderId
-        }, 'Payment Link creation failed, falling back to Orders API');
-      }
-
-      // FALLBACK: Use Orders API if Payment Link fails
+      // Use Orders API for payment
       const payload = {
         order_id: orderData.orderId,
         order_amount: orderData.amount,
@@ -260,13 +211,11 @@ class CashfreeService {
         orderResponseKeys: Object.keys(orderResponse.data)
       }, 'Cashfree order created');
 
-      // For mobile apps, use our server-side payment page with SDK
       const paymentUrl = `${process.env.SERVER_URL || 'http://localhost:3000'}/payment/initiate?orderId=${orderData.orderId}`;
 
       logger.info({
         orderId: orderData.orderId,
-        paymentUrl: paymentUrl.substring(0, 60) + '...',
-        usingPaymentLink: false
+        paymentUrl: paymentUrl.substring(0, 60) + '...'
       }, 'Payment URL generated');
 
       return {
