@@ -54,77 +54,72 @@ class CashfreeService {
     notifyUrl: string;
   }) {
     try {
-      // Sanitize phone number
-      let phone = orderData.customerDetails.customerPhone;
-      phone = phone.replace(/\D/g, '');
-      if (phone.startsWith('91') && phone.length === 12) {
-        phone = phone.substring(2);
-      }
-
       const payload = {
         order_id: orderData.orderId,
         order_amount: orderData.amount,
         order_currency: orderData.currency,
         customer_details: {
-          customer_id: orderData.customerDetails.customerId.substring(0, 50),
-          customer_name: orderData.customerDetails.customerName.substring(0, 100),
+          customer_id: orderData.customerDetails.customerId,
+          customer_name: orderData.customerDetails.customerName,
           customer_email: orderData.customerDetails.customerEmail,
-          customer_phone: phone,
+          customer_phone: orderData.customerDetails.customerPhone,
         },
         order_meta: {
-          return_url: `${orderData.returnUrl}?order_id={order_id}`,
+          return_url: orderData.returnUrl,
           notify_url: orderData.notifyUrl,
         },
       };
 
       const config = this.initializeConfig();
 
-      logger.info({
-        orderId: orderData.orderId,
-        amount: orderData.amount,
-        environment: config.baseUrl.includes('sandbox') ? 'SANDBOX' : 'PRODUCTION',
-      }, 'Creating Cashfree order');
-
-      // Create order using Orders API
+      // Step 1: Create order
       const orderResponse = await axios.post(
         `${config.baseUrl}/orders`,
         payload,
-        { headers: this.getHeaders(), timeout: 30000 }
+        { headers: this.getHeaders() }
       );
 
-      const orderData2 = orderResponse.data;
-      const paymentSessionId = orderData2.payment_session_id;
+      logger.info({ orderId: orderData.orderId }, 'Cashfree order created');
 
-      if (!paymentSessionId) {
-        logger.error({ orderResponse: orderData2 }, 'No payment_session_id in response');
-        throw new Error('Payment session ID not received from Cashfree');
-      }
+      // Step 2: Create payment link for the order
+      const linkPayload = {
+        link_id: `LINK_${orderData.orderId}`,
+        link_amount: orderData.amount,
+        link_currency: orderData.currency,
+        link_purpose: `Payment for ${orderData.orderId}`,
+        customer_details: {
+          customer_phone: orderData.customerDetails.customerPhone,
+          customer_email: orderData.customerDetails.customerEmail,
+          customer_name: orderData.customerDetails.customerName,
+        },
+        link_notify: {
+          send_sms: false,
+          send_email: false,
+        },
+        link_meta: {
+          return_url: orderData.returnUrl,
+          notify_url: orderData.notifyUrl,
+        },
+      };
 
-      // Generate payment URL that points to our redirect handler
-      const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
-      const paymentUrl = `${serverUrl}/payment/initiate?orderId=${orderData.orderId}`;
+      const linkResponse = await axios.post(
+        `${config.baseUrl}/links`,
+        linkPayload,
+        { headers: this.getHeaders() }
+      );
 
-      logger.info({
-        orderId: orderData.orderId,
-        cashfreeOrderId: orderData2.order_id,
-        hasSessionId: !!paymentSessionId,
-        environment: config.baseUrl.includes('sandbox') ? 'SANDBOX' : 'PRODUCTION',
-      }, 'Cashfree order created successfully');
+      logger.info({ orderId: orderData.orderId, link: linkResponse.data.link_url }, 'Payment link created');
 
       return {
-        order: {
-          ...orderData2,
-          payment_session_id: paymentSessionId,
-        },
-        payment_link: paymentUrl,
-        link_id: orderData.orderId,
-        payment_session_id: paymentSessionId,
+        order: orderResponse.data,
+        payment_link: linkResponse.data.link_url,
+        link_id: linkResponse.data.link_id,
       };
     } catch (error: any) {
       logger.error({
         error: error.response?.data || error.message,
         orderId: orderData.orderId
-      }, 'Failed to create order');
+      }, 'Failed to create order and payment link');
       throw error;
     }
   }
