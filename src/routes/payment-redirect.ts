@@ -109,51 +109,114 @@ router.get('/initiate', async (req: Request, res: Response) => {
           p {
             margin: 0.5rem 0;
             opacity: 0.9;
+            font-size: 0.9rem;
           }
           .error {
             background: rgba(255, 0, 0, 0.2);
             padding: 1rem;
             border-radius: 8px;
             margin-top: 1rem;
+            font-size: 0.85rem;
+          }
+          .debug {
+            font-size: 0.75rem;
+            opacity: 0.7;
+            margin-top: 0.5rem;
           }
         </style>
       </head>
       <body>
         <div class="container">
-          <div class="spinner"></div>
+          <div class="spinner" id="spinner"></div>
           <h1>Redirecting to Payment Gateway</h1>
           <p>Setting up your secure payment...</p>
           <p>Order ID: ${orderId}</p>
+          <p class="debug" id="status">Initializing...</p>
           <div id="error-message" class="error" style="display: none;"></div>
         </div>
         <script>
-          const cashfree = Cashfree({
-            mode: "${isTestMode ? 'sandbox' : 'production'}"
-          });
-
           const paymentSessionId = "${paymentSessionId}";
           const orderId = "${orderId}";
-
-          // Initialize checkout
-          cashfree.checkout({
-            paymentSessionId: paymentSessionId,
-            redirectTarget: "_self"
-          }).then(function(result) {
-            if (result.error) {
-              console.error('Payment initialization error:', result.error);
-              document.getElementById('error-message').style.display = 'block';
-              document.getElementById('error-message').textContent = 'Error: ' + result.error.message;
-              document.querySelector('.spinner').style.display = 'none';
-            }
-            if (result.redirect) {
-              console.log('Payment will be redirected');
-            }
-          }).catch(function(error) {
-            console.error('Cashfree checkout error:', error);
+          const mode = "${isTestMode ? 'sandbox' : 'production'}";
+          const baseUrl = "${baseUrl}";
+          
+          let redirected = false;
+          
+          function showError(message, details) {
+            console.error(message, details);
             document.getElementById('error-message').style.display = 'block';
-            document.getElementById('error-message').textContent = 'Failed to initialize payment. Please try again.';
-            document.querySelector('.spinner').style.display = 'none';
-          });
+            document.getElementById('error-message').innerHTML = message + (details ? '<br><small>' + details + '</small>' : '');
+            document.getElementById('spinner').style.display = 'none';
+          }
+          
+          function updateStatus(text) {
+            document.getElementById('status').textContent = text;
+            console.log(text);
+          }
+          
+          function fallbackRedirect() {
+            if (redirected) return;
+            redirected = true;
+            
+            updateStatus('Using fallback redirect...');
+            // Redirect to Cashfree's hosted checkout page
+            const hostedUrl = baseUrl + '/checkout?payment_session_id=' + paymentSessionId;
+            console.log('Redirecting to:', hostedUrl);
+            window.location.href = hostedUrl;
+          }
+
+          // Set a timeout fallback in case SDK doesn't work
+          const fallbackTimeout = setTimeout(function() {
+            console.warn('SDK initialization timeout, using fallback redirect');
+            fallbackRedirect();
+          }, 5000);
+
+          // Wait for page to fully load
+          window.onload = function() {
+            updateStatus('SDK loaded, initializing Cashfree...');
+            
+            try {
+              // Check if Cashfree SDK is available
+              if (typeof Cashfree === 'undefined') {
+                clearTimeout(fallbackTimeout);
+                showError('Cashfree SDK failed to load', 'Using fallback redirect...');
+                setTimeout(fallbackRedirect, 1000);
+                return;
+              }
+              
+              updateStatus('Creating Cashfree instance...');
+              const cashfree = Cashfree({ mode: mode });
+              
+              updateStatus('Starting checkout...');
+              
+              // Initialize checkout
+              cashfree.checkout({
+                paymentSessionId: paymentSessionId,
+                redirectTarget: "_self"
+              }).then(function(result) {
+                clearTimeout(fallbackTimeout);
+                console.log('Checkout result:', result);
+                
+                if (result.error) {
+                  showError('Payment initialization error', result.error.message || JSON.stringify(result.error));
+                  setTimeout(fallbackRedirect, 2000);
+                } else if (result.redirect) {
+                  redirected = true;
+                  updateStatus('Redirecting to payment page...');
+                } else {
+                  updateStatus('Payment initiated successfully');
+                }
+              }).catch(function(error) {
+                clearTimeout(fallbackTimeout);
+                showError('Checkout failed', error.message || error.toString());
+                setTimeout(fallbackRedirect, 2000);
+              });
+            } catch (error) {
+              clearTimeout(fallbackTimeout);
+              showError('Unexpected error', error.message || error.toString());
+              setTimeout(fallbackRedirect, 2000);
+            }
+          };
         </script>
       </body>
       </html>
