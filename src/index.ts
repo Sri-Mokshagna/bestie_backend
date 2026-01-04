@@ -61,7 +61,41 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 
 // Middleware
-app.use(helmet());
+// Configure helmet with CSP that allows Cashfree SDK for payment pages
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "'unsafe-eval'",
+          "https://sdk.cashfree.com",
+          "https://payments.cashfree.com",
+          "https://payments-test.cashfree.com",
+        ],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: [
+          "'self'",
+          "https://api.cashfree.com",
+          "https://sandbox.cashfree.com",
+          "https://payments.cashfree.com",
+          "https://payments-test.cashfree.com",
+          "wss:",
+          "ws:",
+        ],
+        frameSrc: [
+          "'self'",
+          "https://payments.cashfree.com",
+          "https://payments-test.cashfree.com",
+        ],
+        fontSrc: ["'self'", "https:", "data:"],
+      },
+    },
+  })
+);
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN || '*',
