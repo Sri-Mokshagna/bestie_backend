@@ -213,6 +213,12 @@ function renderPaymentPage(options: {
 }): string {
   const { orderId, paymentSessionId, environment, amount, planName } = options;
   
+  // Cashfree hosted checkout URL - works without SDK
+  const cashfreeBaseUrl = environment === 'production' 
+    ? 'https://payments.cashfree.com/order' 
+    : 'https://payments-test.cashfree.com/order';
+  const checkoutUrl = `${cashfreeBaseUrl}/#${paymentSessionId}`;
+  
   return `
     <!DOCTYPE html>
     <html>
@@ -220,260 +226,126 @@ function renderPaymentPage(options: {
       <title>Complete Payment - Bestie</title>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-          background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-          min-height: 100vh;
-        }
-        .header {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          padding: 1.5rem;
-          text-align: center;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .header h1 {
-          font-size: 1.25rem;
-          margin-bottom: 0.5rem;
-        }
-        .header .order-info {
-          font-size: 0.85rem;
-          opacity: 0.9;
-        }
-        .header .amount {
-          font-size: 1.5rem;
-          font-weight: bold;
-          margin-top: 0.5rem;
-        }
-        .container {
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 1rem;
-        }
-        #payment-container {
-          background: white;
-          border-radius: 12px;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-          min-height: 300px;
-          margin-top: 1rem;
-          overflow: hidden;
+          min-height: 100vh;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          padding: 2rem;
+          color: white;
         }
-        .loading {
+        .container {
           text-align: center;
+          padding: 2rem;
+          max-width: 400px;
         }
-        .spinner {
-          width: 48px;
-          height: 48px;
-          border: 4px solid #f3f3f3;
-          border-top: 4px solid #667eea;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin: 0 auto 1rem;
+        .icon {
+          font-size: 4rem;
+          margin-bottom: 1rem;
         }
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
+        h1 {
+          font-size: 1.5rem;
+          margin-bottom: 0.5rem;
+        }
+        .amount {
+          font-size: 2.5rem;
+          font-weight: bold;
+          margin: 1rem 0;
+        }
+        .plan-name {
+          opacity: 0.9;
+          margin-bottom: 2rem;
         }
         .pay-btn {
           display: inline-block;
           padding: 1rem 3rem;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
+          background: white;
+          color: #667eea;
           border: none;
           border-radius: 12px;
           cursor: pointer;
-          font-size: 1.1rem;
+          font-size: 1.2rem;
           font-weight: 600;
           text-decoration: none;
-          margin-top: 1rem;
           transition: transform 0.2s, box-shadow 0.2s;
         }
         .pay-btn:hover {
           transform: translateY(-2px);
-          box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+          box-shadow: 0 4px 20px rgba(0,0,0,0.2);
         }
-        .pay-btn:disabled {
-          opacity: 0.7;
-          cursor: not-allowed;
-        }
-        .error-box {
-          background: #fee;
-          border: 1px solid #fcc;
-          color: #c33;
-          padding: 1.5rem;
-          margin: 1rem;
-          border-radius: 8px;
-          text-align: center;
-        }
-        .error-box h3 { margin-bottom: 0.5rem; }
-        .retry-btn {
-          display: inline-block;
-          margin-top: 1rem;
-          padding: 0.75rem 2rem;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          border: none;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 1rem;
-          text-decoration: none;
-        }
-        .retry-btn:hover { opacity: 0.9; }
         .secure-badge {
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 0.5rem;
-          margin-top: 1rem;
-          color: #666;
+          margin-top: 2rem;
           font-size: 0.85rem;
+          opacity: 0.8;
         }
         .secure-badge svg {
           width: 16px;
           height: 16px;
+          fill: currentColor;
         }
-        .payment-info {
-          text-align: center;
-          color: #666;
-          margin-bottom: 1rem;
+        .loading {
+          display: none;
         }
-        .payment-info p {
-          margin: 0.5rem 0;
+        .loading.active {
+          display: block;
+        }
+        .spinner {
+          width: 24px;
+          height: 24px;
+          border: 3px solid rgba(255,255,255,0.3);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          display: inline-block;
+          margin-right: 8px;
+          vertical-align: middle;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
       </style>
     </head>
     <body>
-      <div class="header">
-        <h1>🔒 Secure Payment</h1>
-        <div class="amount">₹${amount}</div>
-        <div class="order-info">${planName}</div>
-      </div>
-
       <div class="container">
-        <div id="payment-container">
-          <div class="loading" id="loading-state">
-            <div class="spinner"></div>
-            <p>Preparing payment...</p>
-          </div>
-          <div id="payment-ready" style="display: none; text-align: center;">
-            <div class="payment-info">
-              <p>You are about to pay</p>
-              <p style="font-size: 2rem; font-weight: bold; color: #333;">₹${amount}</p>
-              <p>for ${planName}</p>
-            </div>
-            <button class="pay-btn" id="pay-button" onclick="startPayment()">
-              Pay ₹${amount}
-            </button>
-          </div>
+        <div class="icon">🔒</div>
+        <h1>Secure Payment</h1>
+        <div class="amount">₹${amount}</div>
+        <div class="plan-name">${planName}</div>
+        
+        <a href="${checkoutUrl}" class="pay-btn" id="pay-btn" onclick="showLoading()">
+          Pay Now
+        </a>
+        
+        <div class="loading" id="loading">
+          <span class="spinner"></span> Redirecting to payment...
         </div>
         
         <div class="secure-badge">
-          <svg viewBox="0 0 24 24" fill="currentColor">
+          <svg viewBox="0 0 24 24">
             <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
           </svg>
           Secured by Cashfree Payments
         </div>
       </div>
-
+      
       <script>
-        const SESSION_ID = "${paymentSessionId}";
-        const ORDER_ID = "${orderId}";
-        const MODE = "${environment}";
-        let cashfreeInstance = null;
-        
-        console.log('[Payment] Page loaded, Mode:', MODE);
-        
-        function showError(title, message) {
-          document.getElementById('payment-container').innerHTML = 
-            '<div class="error-box">' +
-            '<h3>' + title + '</h3>' +
-            '<p>' + message + '</p>' +
-            '<button class="retry-btn" onclick="location.reload()">Retry</button>' +
-            '</div>';
+        function showLoading() {
+          document.getElementById('pay-btn').style.display = 'none';
+          document.getElementById('loading').classList.add('active');
         }
         
-        function showPayButton() {
-          document.getElementById('loading-state').style.display = 'none';
-          document.getElementById('payment-ready').style.display = 'block';
-        }
-        
-        function startPayment() {
-          const btn = document.getElementById('pay-button');
-          btn.disabled = true;
-          btn.textContent = 'Processing...';
-          
-          try {
-            if (!cashfreeInstance) {
-              cashfreeInstance = Cashfree({ mode: MODE });
-            }
-            
-            // Use checkout() for redirect-based payment (more reliable)
-            cashfreeInstance.checkout({
-              paymentSessionId: SESSION_ID,
-              redirectTarget: "_self"
-            }).then(function(result) {
-              console.log('[Payment] Checkout result:', result);
-              if (result.error) {
-                showError('Payment Failed', result.error.message || 'Payment was not completed.');
-              }
-              if (result.paymentDetails) {
-                console.log('[Payment] Payment completed:', result.paymentDetails);
-              }
-            }).catch(function(error) {
-              console.error('[Payment] Checkout error:', error);
-              showError('Payment Error', error?.message || 'Something went wrong. Please try again.');
-            });
-          } catch (error) {
-            console.error('[Payment] Exception:', error);
-            showError('Payment Error', 'Unable to process payment. Please try again.');
-          }
-        }
-        
-        function initPayment() {
-          try {
-            if (typeof Cashfree === 'undefined') {
-              console.error('[Payment] Cashfree SDK not loaded');
-              showError('Loading Error', 'Payment system failed to load. Please check your internet connection and refresh.');
-              return;
-            }
-            
-            console.log('[Payment] Cashfree SDK loaded successfully');
-            cashfreeInstance = Cashfree({ mode: MODE });
-            
-            // Show the pay button
-            showPayButton();
-              
-          } catch (error) {
-            console.error('[Payment] Init error:', error);
-            showError('Initialization Error', 'Unable to initialize payment. Please refresh and try again.');
-          }
-        }
-        
-        // Initialize after SDK loads
-        if (document.readyState === 'complete') {
-          setTimeout(initPayment, 500);
-        } else {
-          window.addEventListener('load', function() {
-            setTimeout(initPayment, 500);
-          });
-        }
-        
-        // Fallback: retry after 3 seconds if still loading
+        // Auto-redirect after 1 second for better UX
         setTimeout(function() {
-          var loadingEl = document.getElementById('loading-state');
-          if (loadingEl && loadingEl.style.display !== 'none') {
-            console.log('[Payment] Fallback initialization...');
-            initPayment();
-          }
-        }, 3000);
+          window.location.href = '${checkoutUrl}';
+        }, 1000);
       </script>
     </body>
     </html>
