@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { User, UserRole, UserStatus } from '../models/User';
+import { Responder, KycStatus } from '../models/Responder';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -17,12 +18,6 @@ async function addTestResponder() {
             role: UserRole.RESPONDER,
             status: UserStatus.ACTIVE,
             coinBalance: 0,
-            isOnline: true,
-            isAvailable: true,
-            audioEnabled: true,
-            videoEnabled: true,
-            chatEnabled: true,
-            inCall: false,
             profile: {
                 name: 'Test Responder',
                 gender: 'female',
@@ -31,8 +26,28 @@ async function addTestResponder() {
             },
         });
 
+        // Create corresponding Responder document
+        const responderDoc1 = await Responder.create({
+            userId: testResponder._id,
+            isOnline: true,
+            audioEnabled: true,
+            videoEnabled: true,
+            chatEnabled: true,
+            inCall: false,
+            kycStatus: KycStatus.VERIFIED,
+            earnings: {
+                totalCoins: 0,
+                pendingCoins: 0,
+                lockedCoins: 0,
+                redeemedCoins: 0,
+            },
+            rating: 0,
+            bio: testResponder.profile.bio,
+        });
+
         console.log('✅ Test responder created successfully!');
-        console.log('ID:', testResponder._id);
+        console.log('User ID:', testResponder._id);
+        console.log('Responder ID:', responderDoc1._id);
         console.log('Phone:', testResponder.phone);
         console.log('Name:', testResponder.profile.name);
 
@@ -42,12 +57,6 @@ async function addTestResponder() {
             role: UserRole.RESPONDER,
             status: UserStatus.ACTIVE,
             coinBalance: 0,
-            isOnline: true,
-            isAvailable: true,
-            audioEnabled: true,
-            videoEnabled: false, // Video disabled
-            chatEnabled: true,
-            inCall: false,
             profile: {
                 name: 'Sarah',
                 gender: 'female',
@@ -56,8 +65,28 @@ async function addTestResponder() {
             },
         });
 
+        // Create corresponding Responder document
+        const responderDoc2 = await Responder.create({
+            userId: testResponder2._id,
+            isOnline: true,
+            audioEnabled: true,
+            videoEnabled: false, // Video disabled
+            chatEnabled: true,
+            inCall: false,
+            kycStatus: KycStatus.VERIFIED,
+            earnings: {
+                totalCoins: 0,
+                pendingCoins: 0,
+                lockedCoins: 0,
+                redeemedCoins: 0,
+            },
+            rating: 0,
+            bio: testResponder2.profile.bio,
+        });
+
         console.log('\n✅ Second test responder created successfully!');
-        console.log('ID:', testResponder2._id);
+        console.log('User ID:', testResponder2._id);
+        console.log('Responder ID:', responderDoc2._id);
         console.log('Phone:', testResponder2.phone);
         console.log('Name:', testResponder2.profile.name);
 

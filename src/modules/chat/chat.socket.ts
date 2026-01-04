@@ -1,7 +1,9 @@
 import { Server as SocketServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
+import { Types } from 'mongoose';
 import { Chat, Message } from '../../models/Chat';
-import { User } from '../../models/User';
+import { User, UserRole } from '../../models/User';
+import { Responder } from '../../models/Responder';
 import { coinService } from '../../services/coinService';
 import { logger } from '../../lib/logger';
 import { getAuth } from 'firebase-admin/auth';
@@ -53,8 +55,15 @@ export function initializeChatSocket(io: SocketServer) {
       socket.userId = user._id.toString();
       logger.info({ msg: 'Socket authenticated', userId: socket.userId });
       next();
-    } catch (error) {
-      logger.error({ msg: 'Socket authentication error', error });
+    } catch (error: any) {
+      logger.error({ msg: 'Socket authentication error', error: error.message, code: error.code });
+      
+      // Check if it's a token expiration error
+      if (error.code === 'auth/id-token-expired') {
+        logger.warn({ msg: 'Firebase ID token expired during socket authentication' });
+        return next(new Error('Firebase ID token expired. Please refresh your token and reconnect.'));
+      }
+      
       next(new Error('Authentication error'));
     }
   });
@@ -107,15 +116,19 @@ export function initializeChatSocket(io: SocketServer) {
           return;
         }
 
-        // Verify chat exists and user is participant
-        const chat = await Chat.findById(roomId);
+        // PERFORMANCE: Run initial validations in parallel
+        const [chat, chatEnabled] = await Promise.all([
+          Chat.findById(roomId).lean(),
+          coinService.isFeatureEnabled('chat'),
+        ]);
+        
         if (!chat) {
           socket.emit('error', { message: 'Chat not found' });
           return;
         }
 
         const isParticipant = chat.participants.some(
-          (p) => p.toString() === socket.userId
+          (p: any) => p.toString() === socket.userId
         );
 
         if (!isParticipant) {
@@ -125,7 +138,7 @@ export function initializeChatSocket(io: SocketServer) {
 
         // Get the other participant (responder)
         const responderId = chat.participants.find(
-          (p) => p.toString() !== socket.userId
+          (p: any) => p.toString() !== socket.userId
         );
 
         if (!responderId) {
@@ -134,7 +147,6 @@ export function initializeChatSocket(io: SocketServer) {
         }
 
         // Check if chat is enabled
-        const chatEnabled = await coinService.isFeatureEnabled('chat');
         if (!chatEnabled) {
           socket.emit('error', {
             message: 'Chat feature is currently disabled',
@@ -164,29 +176,41 @@ export function initializeChatSocket(io: SocketServer) {
 
         // Create message
         const message = await Message.create({
-          chatId: roomId,
-          senderId: socket.userId,
+          chatId: new Types.ObjectId(roomId),
+          senderId: new Types.ObjectId(socket.userId),
           content: body,
           type: 'text',
           coinsCharged: result.coinsDeducted,
         });
 
-        // Update chat last message time
-        chat.lastMessageAt = new Date();
-        await chat.save();
+        // PERFORMANCE: Format message immediately without populate (we know the senderId)
+        // This saves a DB query and speeds up message delivery
+        const fastMessage = {
+          id: message._id.toString(),
+          _id: message._id.toString(),
+          chatId: message.chatId.toString(),
+          senderId: message.senderId.toString(),
+          content: message.content,
+          type: message.type || 'text',
+          coinsCharged: message.coinsCharged,
+          createdAt: message.createdAt,
+        };
 
-        // Populate sender info
-        const populatedMessage = await Message.findById(message._id)
-          .populate('senderId', 'profile phone')
-          .lean();
+        // PERFORMANCE: Emit to room IMMEDIATELY (don't wait for chat.save)
+        io.to(roomId).emit('new_message', fastMessage);
 
-        // Broadcast to room
-        io.to(roomId).emit('new_message', populatedMessage);
-
-        // Send updated balance to sender
+        // Send updated balance to sender immediately
         socket.emit('coin_balance_updated', {
           balance: result.balance,
           coinsDeducted: result.coinsDeducted,
+        });
+
+        // BACKGROUND: Update chat lastMessageAt (non-blocking)
+        Chat.updateOne(
+          { _id: roomId },
+          { lastMessageAt: new Date() }
+        ).exec().catch(err => {
+          logger.error(`Failed to update chat lastMessageAt: ${err}`);
         });
 
         logger.info(
@@ -202,8 +226,58 @@ export function initializeChatSocket(io: SocketServer) {
       socket.to(roomId).emit('typing', { userId: socket.userId });
     });
 
-    socket.on('disconnect', () => {
-      logger.info(`User ${socket.userId} disconnected from chat`);
+    // Listen for responder availability updates and broadcast to all connected users
+    socket.on('responder_availability_update', async (data) => {
+      try {
+        logger.info({ msg: 'Responder availability update received', data, socketId: socket.id });
+        
+        // Broadcast to ALL connected sockets except the sender
+        // This ensures all users see the real-time availability change
+        socket.broadcast.emit('responder_availability_update', {
+          responderId: data.responderId,
+          audioEnabled: data.audioEnabled,
+          videoEnabled: data.videoEnabled,
+          chatEnabled: data.chatEnabled,
+          isOnline: data.audioEnabled || data.videoEnabled || data.chatEnabled,
+        });
+        
+        logger.info({ msg: 'Availability update broadcasted', responderId: data.responderId });
+      } catch (error) {
+        logger.error({ msg: 'Error broadcasting availability update', error });
+      }
+    });
+
+    socket.on('disconnect', async () => {
+      logger.info(`User ${socket.userId} disconnected from chat (socket: ${socket.id})`);
+      
+      // AUTO-OFFLINE: Set responders offline when they disconnect
+      if (socket.userId) {
+        try {
+          const user = await User.findById(socket.userId);
+          
+          if (user && user.role === UserRole.RESPONDER) {
+            // Update User model - set offline and reset inCall
+            user.isOnline = false;
+            user.inCall = false; // Reset inCall in case they were in a call
+            user.lastOnlineAt = new Date();
+            await user.save();
+            
+            // Update Responder model - set offline and reset inCall
+            await Responder.findOneAndUpdate(
+              { userId: socket.userId },
+              { 
+                isOnline: false,
+                inCall: false, // Reset inCall in case they were in a call
+                lastOnlineAt: new Date()
+              }
+            );
+            
+            logger.info(`Auto-offline: Responder ${socket.userId} (${user.profile?.name || user.phone}) set to offline on disconnect`);
+          }
+        } catch (error) {
+          logger.error(`Auto-offline error for user ${socket.userId}: ${error}`);
+        }
+      }
     });
   });
 

@@ -5,7 +5,10 @@ import { logger } from '../lib/logger';
 
 /**
  * Parse Cashfree webhook data to extract payment information
- * Handles both PAYMENT_SUCCESS_WEBHOOK and PAYMENT_LINK_EVENT formats
+ * Handles multiple webhook formats:
+ * - PAYMENT_SUCCESS_WEBHOOK / PAYMENT_FAILED_WEBHOOK (new format)
+ * - PAYMENT_LINK_EVENT (legacy format)
+ * - ORDER_WEBHOOK (order status updates)
  */
 export function parseCashfreeWebhook(webhookData: any): {
     order_id: string;
@@ -15,46 +18,82 @@ export function parseCashfreeWebhook(webhookData: any): {
     ourOrderId: string | null;
 } {
     const webhookType = webhookData.type;
-    let order_id: string;
-    let payment_status: string;
-    let payment_method: any;
-    let cf_payment_id: string;
+    let order_id: string = '';
+    let payment_status: string = '';
+    let payment_method: any = null;
+    let cf_payment_id: string = '';
     let ourOrderId: string | null = null;
 
-    if (webhookType === 'PAYMENT_SUCCESS_WEBHOOK' || webhookType === 'PAYMENT_FAILED_WEBHOOK') {
-        // Payment webhook structure: data.order.order_id, data.payment.*
-        order_id = webhookData.data?.order?.order_id;
-        payment_status = webhookData.data?.payment?.payment_status;
-        payment_method = webhookData.data?.payment?.payment_method;
-        cf_payment_id = webhookData.data?.payment?.cf_payment_id;
+    logger.info({ webhookType, rawData: webhookData }, 'Parsing Cashfree webhook');
 
-        // Extract our original order ID from link_id (format: LINK_ORDER_xxx)
-        if (webhookData.data?.order?.order_tags?.link_id) {
+    if (webhookType === 'PAYMENT_SUCCESS_WEBHOOK' || webhookType === 'PAYMENT_FAILED_WEBHOOK') {
+        // New Payment webhook format: data.order.order_id, data.payment.*
+        order_id = webhookData.data?.order?.order_id || '';
+        payment_status = webhookData.data?.payment?.payment_status || '';
+        payment_method = webhookData.data?.payment?.payment_method;
+        cf_payment_id = webhookData.data?.payment?.cf_payment_id?.toString() || '';
+
+        // Extract our original order ID from order_tags
+        if (webhookData.data?.order?.order_tags?.original_order_id) {
+            ourOrderId = webhookData.data.order.order_tags.original_order_id;
+        } else if (webhookData.data?.order?.order_tags?.link_id) {
+            // Fallback for old format
             const linkId = webhookData.data.order.order_tags.link_id;
             ourOrderId = linkId.replace(/^LINK_/, '');
         }
     } else if (webhookType === 'PAYMENT_LINK_EVENT') {
-        // Payment link webhook structure: data.order.order_id, data.link_id
-        order_id = webhookData.data?.order?.order_id;
+        // Legacy Payment link webhook: data.order.order_id, data.link_id
+        order_id = webhookData.data?.order?.order_id || '';
         payment_status = webhookData.data?.order?.transaction_status === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
         payment_method = null;
-        cf_payment_id = webhookData.data?.order?.transaction_id;
+        cf_payment_id = webhookData.data?.order?.transaction_id?.toString() || '';
 
         // Extract our original order ID from link_id
         if (webhookData.data?.link_id) {
             const linkId = webhookData.data.link_id;
             ourOrderId = linkId.replace(/^LINK_/, '');
         }
+    } else if (webhookType === 'ORDER_WEBHOOK' || webhookType?.includes('ORDER')) {
+        // Order status webhook
+        order_id = webhookData.data?.order?.order_id || webhookData.order_id || '';
+        const orderStatus = webhookData.data?.order?.order_status || webhookData.order_status || '';
+        
+        // Map order status to payment status
+        if (orderStatus === 'PAID') {
+            payment_status = 'SUCCESS';
+        } else if (orderStatus === 'EXPIRED' || orderStatus === 'TERMINATED') {
+            payment_status = 'FAILED';
+        } else if (orderStatus === 'ACTIVE') {
+            payment_status = 'PENDING';
+        } else {
+            payment_status = orderStatus;
+        }
+        
+        cf_payment_id = webhookData.data?.payment?.cf_payment_id?.toString() || '';
+        
+        if (webhookData.data?.order?.order_tags?.original_order_id) {
+            ourOrderId = webhookData.data.order.order_tags.original_order_id;
+        }
     } else {
-        throw new Error(`Unknown webhook type: ${webhookType}`);
+        logger.warn({ webhookType, webhookData }, 'Unknown webhook type - attempting to parse');
+        
+        // Try to extract data from unknown format
+        order_id = webhookData.data?.order?.order_id || 
+                   webhookData.order_id || 
+                   webhookData.data?.order_id || '';
+        payment_status = webhookData.data?.payment?.payment_status || 
+                        webhookData.payment_status || 
+                        webhookData.status || 'UNKNOWN';
+        cf_payment_id = webhookData.data?.payment?.cf_payment_id?.toString() || '';
     }
 
     logger.info({
         webhookType,
         cashfreeOrderId: order_id,
         ourOrderId,
-        payment_status
-    }, 'Parsed Cashfree webhook');
+        payment_status,
+        cf_payment_id: cf_payment_id?.substring(0, 10) || 'N/A',
+    }, '✅ Parsed Cashfree webhook');
 
     return { order_id, payment_status, payment_method, cf_payment_id, ourOrderId };
 }
