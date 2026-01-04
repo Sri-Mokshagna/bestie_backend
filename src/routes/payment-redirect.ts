@@ -103,7 +103,7 @@ async function recreatePaymentSession(payment: any): Promise<string | null> {
         customerEmail,
         customerPhone: user.phone || '',
       },
-      returnUrl: `${serverUrl}/payment/success?orderId=${payment.orderId}`,
+      // NOTE: No returnUrl - using direct redirect which requires webhook + polling
       notifyUrl: `${serverUrl}/api/payments/webhook`,
     });
 

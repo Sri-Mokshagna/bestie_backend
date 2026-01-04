@@ -278,7 +278,7 @@ class CashfreeService {
       customerEmail: string;
       customerPhone: string;
     };
-    returnUrl: string;
+    returnUrl?: string;  // Optional - not used for direct redirect
     notifyUrl: string;
   }) {
     return this.withRetry(async () => {
