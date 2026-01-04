@@ -129,13 +129,9 @@ async function recreatePaymentSession(payment: any): Promise<string | null> {
 }
 
 /**
- * Payment Initiation Page
- * Renders the Cashfree Drop component for payment
- * 
- * This page is shown after order creation and handles:
- * - Loading the payment session from database
- * - Rendering the Cashfree Drop JS SDK
- * - Handling payment completion redirects
+ * Payment Initiation - IMMEDIATE REDIRECT
+ * Instead of rendering a page, redirect immediately to Cashfree
+ * This prevents session expiry issues
  */
 router.get('/initiate', async (req: Request, res: Response) => {
   try {
@@ -216,20 +212,14 @@ router.get('/initiate', async (req: Request, res: Response) => {
     }
 
     // Determine environment - prefer stored environment from order creation
-    // This ensures we redirect to the same environment where the session was created
     let environment: 'sandbox' | 'production' = 'sandbox';
     
-    // First, check if environment was stored with the order
     if (payment.gatewayResponse?._cashfree_environment) {
       environment = payment.gatewayResponse._cashfree_environment;
       logger.info({ orderId, storedEnvironment: environment }, 'Using stored environment from order');
     } else {
-      // Fallback: detect from current credentials
       const appId = process.env.CASHFREE_APP_ID || '';
       const secretKey = process.env.CASHFREE_SECRET_KEY || '';
-      
-      // If credentials are empty or contain TEST/test markers, use sandbox
-      // Only use production if we have non-test credentials
       const hasCredentials = appId.length > 0 && secretKey.length > 0;
       const hasTestMarkers = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
       
@@ -248,7 +238,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
       }, 'Detected environment from credentials (fallback)');
     }
 
-    // Build the checkout URL here for logging
+    // Build the checkout URL
     const cashfreeBaseUrl = environment === 'production' 
       ? 'https://payments.cashfree.com/order' 
       : 'https://payments-test.cashfree.com/order';
@@ -261,16 +251,10 @@ router.get('/initiate', async (req: Request, res: Response) => {
       environment,
       amount: payment.amount,
       checkoutUrl: checkoutUrl.substring(0, 80) + '...',
-    }, 'Serving payment page');
+    }, 'IMMEDIATE REDIRECT to Cashfree checkout');
 
-    // Render the payment page with Cashfree Drop component
-    res.send(renderPaymentPage({
-      orderId,
-      paymentSessionId,
-      environment,
-      amount: payment.amount,
-      planName: (payment as any).planId?.name || 'Coin Pack',
-    }));
+    // IMMEDIATE REDIRECT - No intermediate page!
+    return res.redirect(checkoutUrl);
 
   } catch (error) {
     logger.error({ error }, 'Error in payment initiation');
