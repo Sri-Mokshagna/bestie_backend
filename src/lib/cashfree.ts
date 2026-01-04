@@ -295,9 +295,20 @@ class CashfreeService {
       }
 
       // Prepare order payload
-      // NOTE: Do NOT include return_url when using direct redirect to checkout
-      // Cashfree invalidates sessions opened via redirect when return_url is present
-      // Handle post-payment via webhook + polling instead
+      // When using JS SDK, include return_url for post-payment redirect
+      // When using direct redirect, omit return_url (pass undefined)
+      const orderMeta: any = {
+        notify_url: orderData.notifyUrl,
+      };
+      
+      // Only include return_url if provided (required for JS SDK approach)
+      if (orderData.returnUrl) {
+        // Append order_id parameter to return URL
+        const returnUrlBase = orderData.returnUrl;
+        const returnUrlSeparator = returnUrlBase.includes('?') ? '&' : '?';
+        orderMeta.return_url = `${returnUrlBase}${returnUrlSeparator}order_id={order_id}`;
+      }
+
       const payload = {
         order_id: orderData.orderId,
         order_amount: orderData.amount,
@@ -308,10 +319,7 @@ class CashfreeService {
           customer_email: orderData.customerDetails.customerEmail,
           customer_phone: phone,
         },
-        order_meta: {
-          // Only notify_url - NO return_url to allow direct redirect
-          notify_url: orderData.notifyUrl,
-        },
+        order_meta: orderMeta,
         order_tags: {
           original_order_id: orderData.orderId,
           source: 'bestie_app',

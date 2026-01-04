@@ -77,7 +77,7 @@ export class PaymentService {
       }, 'Creating Cashfree order');
 
       // Create order with Cashfree
-      // NOTE: No returnUrl - using direct redirect which requires webhook + polling
+      // Using JS SDK approach - return_url is required for SDK redirect
       const result = await cashfreeService.createOrderAndGetLink({
         orderId,
         amount: plan.priceINR,
@@ -88,6 +88,7 @@ export class PaymentService {
           customerEmail,
           customerPhone: user.phone,
         },
+        returnUrl: `${serverUrl}/payment/success?orderId=${orderId}`,
         notifyUrl: `${serverUrl}/api/payments/webhook`,
       });
 
