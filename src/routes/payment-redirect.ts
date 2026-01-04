@@ -8,6 +8,37 @@ import { cashfreeService } from '../lib/cashfree';
 const router = Router();
 
 /**
+ * Debug endpoint to check payment environment configuration
+ */
+router.get('/debug/:orderId', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    const payment = await Payment.findOne({ orderId });
+    
+    const appId = process.env.CASHFREE_APP_ID || '';
+    const secretKey = process.env.CASHFREE_SECRET_KEY || '';
+    const hasCredentials = appId.length > 0 && secretKey.length > 0;
+    const hasTestMarkers = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
+    
+    res.json({
+      orderId,
+      paymentFound: !!payment,
+      storedEnvironment: payment?.gatewayResponse?._cashfree_environment || 'NOT_STORED',
+      paymentSessionId: payment?.gatewayResponse?.payment_session_id?.substring(0, 30) + '...' || 'NONE',
+      credentials: {
+        hasCredentials,
+        hasTestMarkers,
+        appIdPrefix: appId.substring(0, 15) || '(empty)',
+        detectedEnvironment: (!hasCredentials || hasTestMarkers) ? 'sandbox' : 'production',
+      },
+      paymentStatus: payment?.status,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * Helper function to recreate a payment session when the original expires
  * Creates a new Cashfree order with the same details
  */
