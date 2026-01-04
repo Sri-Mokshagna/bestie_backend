@@ -65,14 +65,13 @@ router.get('/initiate', async (req: Request, res: Response) => {
       logger.warn({ orderId, error }, 'Could not check payment status, proceeding with payment initiation');
     }
 
-    // For mobile apps, directly redirect to Cashfree's hosted checkout page
-    // This is more reliable than using the SDK in WebViews
-    const checkoutUrl = `${baseUrl}/checkout?payment_session_id=${paymentSessionId}`;
-
+    // Use Cashfree SDK to initiate checkout with the payment session ID
+    // This is the correct approach as per Cashfree documentation
     logger.info({
       orderId,
-      checkoutUrl: checkoutUrl.substring(0, 50) + '...',
-    }, 'Redirecting to Cashfree hosted checkout');
+      paymentSessionId: paymentSessionId.substring(0, 20) + '...',
+      environment: isTestMode ? 'sandbox' : 'production'
+    }, 'Initiating Cashfree checkout with SDK');
 
     res.send(`
       <!DOCTYPE html>
@@ -81,7 +80,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
         <title>Processing Payment...</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta http-equiv="refresh" content="1;url=${checkoutUrl}">
+        <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
         <style>
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -119,15 +118,25 @@ router.get('/initiate', async (req: Request, res: Response) => {
             opacity: 0.9;
             font-size: 0.9rem;
           }
+          .error {
+            background: rgba(255, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            font-size: 0.85rem;
+            display: none;
+          }
           .button {
             display: inline-block;
-            margin-top: 1.5rem;
+            margin-top: 1rem;
             padding: 0.75rem 2rem;
             background: white;
             color: #667eea;
             text-decoration: none;
+            border: none;
             border-radius: 8px;
             font-weight: 600;
+            cursor: pointer;
             transition: transform 0.2s;
           }
           .button:hover {
@@ -137,17 +146,62 @@ router.get('/initiate', async (req: Request, res: Response) => {
       </head>
       <body>
         <div class="container">
-          <div class="spinner"></div>
-          <h1>Redirecting to Payment Gateway</h1>
-          <p>Please wait while we redirect you to the secure payment page...</p>
+          <div class="spinner" id="spinner"></div>
+          <h1 id="title">Redirecting to Payment Gateway</h1>
+          <p id="message">Please wait while we set up your secure payment...</p>
           <p style="font-size: 0.8rem; opacity: 0.7;">Order ID: ${orderId}</p>
-          <a href="${checkoutUrl}" class="button">Click here if not redirected</a>
+          <div id="error" class="error"></div>
+          <button id="retryBtn" class="button" style="display: none;" onclick="initPayment()">Retry Payment</button>
         </div>
         <script>
-          // Immediate redirect as backup to meta refresh
-          setTimeout(function() {
-            window.location.href = "${checkoutUrl}";
-          }, 1000);
+          const PAYMENT_SESSION_ID = "${paymentSessionId}";
+          const MODE = "${isTestMode ? 'sandbox' : 'production'}";
+          
+          function showError(msg) {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('title').textContent = 'Payment Initialization Failed';
+            document.getElementById('message').textContent = '';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').innerHTML = msg;
+            document.getElementById('retryBtn').style.display = 'inline-block';
+          }
+          
+          function initPayment() {
+            document.getElementById('spinner').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('retryBtn').style.display = 'none';
+            document.getElementById('title').textContent = 'Redirecting to Payment Gateway';
+            document.getElementById('message').textContent = 'Please wait while we set up your secure payment...';
+            
+            try {
+              if (typeof Cashfree === 'undefined') {
+                showError('Payment gateway SDK failed to load. Please check your internet connection and try again.');
+                return;
+              }
+              
+              const cashfree = Cashfree({ mode: MODE });
+              
+              cashfree.checkout({
+                paymentSessionId: PAYMENT_SESSION_ID,
+                redirectTarget: "_self"
+              }).then(function(result) {
+                if (result.error) {
+                  console.error('Cashfree error:', result.error);
+                  showError('Payment initialization failed: ' + (result.error.message || 'Unknown error'));
+                }
+                // If redirect is successful, the page will navigate away
+              }).catch(function(error) {
+                console.error('Checkout error:', error);
+                showError('Failed to initialize payment. Please try again.<br><small>' + error.message + '</small>');
+              });
+            } catch (error) {
+              console.error('Exception:', error);
+              showError('An unexpected error occurred. Please try again.<br><small>' + error.message + '</small>');
+            }
+          }
+          
+          // Start payment initialization after a short delay to ensure SDK is loaded
+          setTimeout(initPayment, 500);
         </script>
       </body>
       </html>
