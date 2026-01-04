@@ -257,13 +257,17 @@ function renderPaymentPage(options: {
           background: white;
           border-radius: 12px;
           box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-          min-height: 400px;
+          min-height: 300px;
           margin-top: 1rem;
           overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 2rem;
         }
         .loading {
           text-align: center;
-          padding: 3rem 1rem;
         }
         .spinner {
           width: 48px;
@@ -277,6 +281,28 @@ function renderPaymentPage(options: {
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
+        }
+        .pay-btn {
+          display: inline-block;
+          padding: 1rem 3rem;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border: none;
+          border-radius: 12px;
+          cursor: pointer;
+          font-size: 1.1rem;
+          font-weight: 600;
+          text-decoration: none;
+          margin-top: 1rem;
+          transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .pay-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        .pay-btn:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
         }
         .error-box {
           background: #fee;
@@ -314,29 +340,38 @@ function renderPaymentPage(options: {
           width: 16px;
           height: 16px;
         }
-        .env-badge {
-          display: inline-block;
-          padding: 2px 8px;
-          background: ${environment === 'production' ? '#28a745' : '#ffc107'};
-          color: ${environment === 'production' ? 'white' : 'black'};
-          font-size: 0.7rem;
-          border-radius: 4px;
-          margin-left: 8px;
+        .payment-info {
+          text-align: center;
+          color: #666;
+          margin-bottom: 1rem;
+        }
+        .payment-info p {
+          margin: 0.5rem 0;
         }
       </style>
     </head>
     <body>
       <div class="header">
-        <h1>🔒 Secure Payment <span class="env-badge">${environment.toUpperCase()}</span></h1>
-        <div class="order-info">Order: ${orderId}</div>
-        <div class="amount">₹${amount} - ${planName}</div>
+        <h1>🔒 Secure Payment</h1>
+        <div class="amount">₹${amount}</div>
+        <div class="order-info">${planName}</div>
       </div>
 
       <div class="container">
         <div id="payment-container">
-          <div class="loading">
+          <div class="loading" id="loading-state">
             <div class="spinner"></div>
-            <p>Loading payment options...</p>
+            <p>Preparing payment...</p>
+          </div>
+          <div id="payment-ready" style="display: none; text-align: center;">
+            <div class="payment-info">
+              <p>You are about to pay</p>
+              <p style="font-size: 2rem; font-weight: bold; color: #333;">₹${amount}</p>
+              <p>for ${planName}</p>
+            </div>
+            <button class="pay-btn" id="pay-button" onclick="startPayment()">
+              Pay ₹${amount}
+            </button>
           </div>
         </div>
         
@@ -352,11 +387,9 @@ function renderPaymentPage(options: {
         const SESSION_ID = "${paymentSessionId}";
         const ORDER_ID = "${orderId}";
         const MODE = "${environment}";
+        let cashfreeInstance = null;
         
-        console.log('[Payment] Page loaded');
-        console.log('[Payment] Environment:', MODE);
-        console.log('[Payment] Order ID:', ORDER_ID);
-        console.log('[Payment] Session ID:', SESSION_ID.substring(0, 30) + '...');
+        console.log('[Payment] Page loaded, Mode:', MODE);
         
         function showError(title, message) {
           document.getElementById('payment-container').innerHTML = 
@@ -367,36 +400,60 @@ function renderPaymentPage(options: {
             '</div>';
         }
         
+        function showPayButton() {
+          document.getElementById('loading-state').style.display = 'none';
+          document.getElementById('payment-ready').style.display = 'block';
+        }
+        
+        function startPayment() {
+          const btn = document.getElementById('pay-button');
+          btn.disabled = true;
+          btn.textContent = 'Processing...';
+          
+          try {
+            if (!cashfreeInstance) {
+              cashfreeInstance = Cashfree({ mode: MODE });
+            }
+            
+            // Use checkout() for redirect-based payment (more reliable)
+            cashfreeInstance.checkout({
+              paymentSessionId: SESSION_ID,
+              redirectTarget: "_self"
+            }).then(function(result) {
+              console.log('[Payment] Checkout result:', result);
+              if (result.error) {
+                showError('Payment Failed', result.error.message || 'Payment was not completed.');
+              }
+              if (result.paymentDetails) {
+                console.log('[Payment] Payment completed:', result.paymentDetails);
+              }
+            }).catch(function(error) {
+              console.error('[Payment] Checkout error:', error);
+              showError('Payment Error', error?.message || 'Something went wrong. Please try again.');
+            });
+          } catch (error) {
+            console.error('[Payment] Exception:', error);
+            showError('Payment Error', 'Unable to process payment. Please try again.');
+          }
+        }
+        
         function initPayment() {
           try {
             if (typeof Cashfree === 'undefined') {
               console.error('[Payment] Cashfree SDK not loaded');
-              showError('SDK Load Error', 'Payment gateway failed to load. Please check your internet connection and try again.');
+              showError('Loading Error', 'Payment system failed to load. Please check your internet connection and refresh.');
               return;
             }
             
-            console.log('[Payment] Initializing Cashfree SDK...');
-            const cashfree = Cashfree({ mode: MODE });
+            console.log('[Payment] Cashfree SDK loaded successfully');
+            cashfreeInstance = Cashfree({ mode: MODE });
             
-            const dropConfig = {
-              paymentSessionId: SESSION_ID,
-              redirectTarget: "_self",
-            };
-            
-            console.log('[Payment] Rendering Drop component...');
-            cashfree.drop(document.getElementById("payment-container"), dropConfig)
-              .then(function(result) {
-                console.log('[Payment] Drop rendered successfully', result);
-              })
-              .catch(function(error) {
-                console.error('[Payment] Drop error:', error);
-                const errorMessage = error?.message || error?.code || 'Unknown error occurred';
-                showError('Payment Load Error', errorMessage + '. Please try again.');
-              });
+            // Show the pay button
+            showPayButton();
               
           } catch (error) {
-            console.error('[Payment] Exception:', error);
-            showError('Initialization Error', 'An unexpected error occurred. Please refresh and try again.');
+            console.error('[Payment] Init error:', error);
+            showError('Initialization Error', 'Unable to initialize payment. Please refresh and try again.');
           }
         }
         
@@ -411,7 +468,8 @@ function renderPaymentPage(options: {
         
         // Fallback: retry after 3 seconds if still loading
         setTimeout(function() {
-          if (document.querySelector('.loading')) {
+          var loadingEl = document.getElementById('loading-state');
+          if (loadingEl && loadingEl.style.display !== 'none') {
             console.log('[Payment] Fallback initialization...');
             initPayment();
           }
