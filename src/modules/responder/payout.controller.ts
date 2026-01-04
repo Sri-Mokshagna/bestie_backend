@@ -7,9 +7,11 @@ import { AppError } from '../../middleware/errorHandler';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { mongoose } from '../../lib/db';
 import { cashfreeService } from '../../lib/cashfree';
+import { logger } from '../../lib/logger';
 
 /**
  * Responder Payout/Redemption Controller
+ * Handles payouts to responders via Cashfree Payout API
  */
 
 export const getEarnings = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -205,7 +207,7 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
 
 /**
  * Admin endpoint to process payout
- * This would integrate with payment gateway
+ * Integrates with Cashfree Payout API for UPI transfers
  */
 export const processPayout = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { payoutId } = req.params;
@@ -247,15 +249,23 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
 
       // Create beneficiary ID (unique per responder)
       const beneId = `BENE_${responder._id}`;
-      const transferId = `TRANSFER_${payout._id}`;
+      const transferId = `TRANSFER_${Date.now()}_${payout._id.toString().slice(-8)}`;
 
       try {
+        logger.info({
+          payoutId,
+          beneId,
+          transferId,
+          amount: payout.amountINR,
+          upiId: payout.upiId,
+        }, '💸 Processing payout via Cashfree');
+
         // Step 1: Create/Register beneficiary with Cashfree
         await cashfreeService.createBeneficiary({
           beneId,
           name: user.profile?.name || 'Responder',
-          email: user.email || `responder${responder._id}@bestie.app`,
-          phone: user.phone,
+          email: user.email || `responder_${responder._id}@bestie.app`,
+          phone: user.phone || '9999999999',
           vpa: payout.upiId,
         });
 
@@ -265,16 +275,27 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
           beneId,
           amount: payout.amountINR,
           transferMode: 'upi',
-          remarks: `Payout for ${payout.coins} coins`,
+          remarks: `Bestie payout - ${payout.coins} coins`,
         });
 
         // Step 3: Update payout with gateway response
         payout.status = PayoutStatus.COMPLETED;
         payout.completedAt = new Date();
-        payout.gatewayResponse = payoutResponse;
+        payout.gatewayResponse = {
+          ...payoutResponse,
+          transferId,
+          beneId,
+        };
         await payout.save({ session });
 
         await session.commitTransaction();
+
+        logger.info({
+          payoutId,
+          transferId,
+          amount: payout.amountINR,
+          status: 'COMPLETED',
+        }, '✅ Payout processed successfully');
 
         res.json({
           message: 'Payout processed successfully',
@@ -285,14 +306,23 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
             upiId: payout.upiId,
             status: payout.status,
             completedAt: payout.completedAt,
+            transferId,
           },
         });
         return;
       } catch (cashfreeError: any) {
         // If Cashfree API fails, mark payout as failed and revert coins
+        logger.error({
+          error: cashfreeError.response?.data || cashfreeError.message,
+          payoutId,
+          beneId,
+          transferId,
+        }, '❌ Cashfree payout failed');
+
         payout.status = PayoutStatus.FAILED;
         payout.gatewayResponse = {
           error: cashfreeError.response?.data || cashfreeError.message,
+          timestamp: new Date().toISOString(),
         };
         await payout.save({ session });
 
@@ -336,6 +366,11 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
       );
 
       await session.commitTransaction();
+
+      logger.info({
+        payoutId,
+        reason: rejectionReason,
+      }, '🚫 Payout rejected');
 
       res.json({
         message: 'Payout rejected successfully',

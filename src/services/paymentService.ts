@@ -10,30 +10,49 @@ import { logger } from '../lib/logger';
 import { AppError } from '../middleware/errorHandler';
 import { parseCashfreeWebhook } from './paymentWebhookHandler';
 
+/**
+ * Payment Service
+ * Handles all payment-related operations including:
+ * - Creating payment orders
+ * - Processing webhooks
+ * - Handling payment status updates
+ * - Refunds
+ */
 export class PaymentService {
+  /**
+   * Create a payment order for coin purchase
+   * This creates an order with Cashfree and returns a payment link
+   */
   async createPaymentOrder(userId: string, planId: string) {
     try {
+      // Fetch user
       const user = await User.findById(userId);
       if (!user) {
         throw new AppError(404, 'User not found');
       }
 
+      // Fetch and validate coin plan
       const plan = await CoinPlan.findById(planId);
       if (!plan || !plan.isActive) {
         throw new AppError(404, 'Coin plan not found or inactive');
       }
 
+      // Validate user has phone number (required for Cashfree)
       if (!user.phone) {
         throw new AppError(400, 'User phone number is required for payment');
       }
 
-      const customerEmail = user.profile?.email || `${user.phone.replace('+', '')}@bestie.app`;
+      // Generate unique order ID
       const orderId = `ORDER_${Date.now()}_${uuidv4().slice(0, 8)}`;
+      
+      // Generate email (use user's email or generate from phone)
+      const customerEmail = user.profile?.email || `user_${user.phone.replace(/\+/g, '')}@bestie.app`;
 
+      // Create payment record in database
       const payment = new Payment({
         userId: new Types.ObjectId(userId),
         orderId,
-        cashfreeOrderId: orderId,
+        cashfreeOrderId: orderId, // Will be updated with Cashfree's order ID
         planId: new Types.ObjectId(planId),
         amount: plan.priceINR,
         coins: plan.coins,
@@ -43,15 +62,28 @@ export class PaymentService {
 
       await payment.save();
 
-      const serverUrl = process.env.SERVER_URL || (process.env.NODE_ENV === 'production' ? 'https://bestie-backend-zmj2.onrender.com' : 'http://localhost:3000');
+      // Get server URL for return/webhook URLs
+      const serverUrl = process.env.SERVER_URL || 
+        (process.env.NODE_ENV === 'production' 
+          ? 'https://bestie-backend-zmj2.onrender.com' 
+          : 'http://localhost:3000');
 
+      logger.info({
+        userId,
+        orderId,
+        planId,
+        amount: plan.priceINR,
+        serverUrl,
+      }, 'Creating Cashfree order');
+
+      // Create order with Cashfree
       const result = await cashfreeService.createOrderAndGetLink({
         orderId,
         amount: plan.priceINR,
         currency: 'INR',
         customerDetails: {
           customerId: userId,
-          customerName: user.profile?.name || 'User',
+          customerName: user.profile?.name || 'Bestie User',
           customerEmail,
           customerPhone: user.phone,
         },
@@ -59,11 +91,18 @@ export class PaymentService {
         notifyUrl: `${serverUrl}/api/payments/webhook`,
       });
 
+      // Update payment record with Cashfree response
       payment.cashfreeOrderId = result.order.order_id;
-      payment.gatewayResponse = result.order;
+      payment.gatewayResponse = result.order; // Contains payment_session_id
       await payment.save();
 
-      logger.info({ userId, orderId, planId, paymentLink: result.payment_link }, 'Payment order and link created');
+      logger.info({ 
+        userId, 
+        orderId, 
+        planId, 
+        cashfreeOrderId: result.order.order_id,
+        hasSessionId: !!result.order.payment_session_id,
+      }, '✅ Payment order created successfully');
 
       return {
         orderId,
@@ -72,9 +111,11 @@ export class PaymentService {
         amount: plan.priceINR,
         coins: plan.coins,
         planName: plan.name,
+        // Include session ID for mobile apps that want to use native SDKs
+        paymentSessionId: result.payment_session_id,
       };
     } catch (error) {
-      logger.error({ error, userId, planId }, 'Failed to create payment order');
+      logger.error({ error, userId, planId }, '❌ Failed to create payment order');
       throw error;
     }
   }

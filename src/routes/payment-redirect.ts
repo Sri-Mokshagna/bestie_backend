@@ -1,287 +1,684 @@
 import { Router, Request, Response } from 'express';
-import { Payment } from '../models/Payment';
+import { Payment, PaymentStatus } from '../models/Payment';
 import { logger } from '../lib/logger';
+import { cashfreeService } from '../lib/cashfree';
 
 const router = Router();
 
+/**
+ * Payment Initiation Page
+ * Renders the Cashfree Drop component for payment
+ * 
+ * This page is shown after order creation and handles:
+ * - Loading the payment session from database
+ * - Rendering the Cashfree Drop JS SDK
+ * - Handling payment completion redirects
+ */
 router.get('/initiate', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.query;
 
     if (!orderId || typeof orderId !== 'string') {
-      return res.status(400).send('Order ID is required');
+      logger.warn('Payment initiation without orderId');
+      return res.status(400).send(renderErrorPage(
+        'Missing Order ID',
+        'Order ID is required to process payment. Please try again from the app.'
+      ));
     }
 
     logger.info({ orderId }, 'Payment initiation request');
 
+    // Find the payment record
     const payment = await Payment.findOne({ orderId });
 
     if (!payment) {
       logger.error({ orderId }, 'Payment not found');
-      return res.status(404).send('Payment order not found');
+      return res.status(404).send(renderErrorPage(
+        'Order Not Found',
+        `Payment order "${orderId}" was not found. It may have expired or been cancelled.`
+      ));
     }
 
+    // Check if payment is already completed
+    if (payment.status === PaymentStatus.SUCCESS) {
+      logger.info({ orderId }, 'Payment already completed - redirecting to success');
+      return res.redirect(`/payment/success?orderId=${orderId}`);
+    }
+
+    // Get the payment session ID from gateway response
     const paymentSessionId = payment.gatewayResponse?.payment_session_id;
 
     if (!paymentSessionId) {
-      logger.error({ orderId }, 'Payment session ID not found');
-      return res.status(500).send('Payment session not initialized');
+      logger.error({ orderId, gatewayResponse: payment.gatewayResponse }, 'Payment session ID not found');
+      
+      // Try to refresh the order status from Cashfree
+      try {
+        const orderStatus = await cashfreeService.getPaymentStatus(orderId);
+        if (orderStatus?.payment_session_id) {
+          // Update the payment record with the session ID
+          payment.gatewayResponse = { ...payment.gatewayResponse, ...orderStatus };
+          await payment.save();
+          
+          // Redirect to self to use the new session ID
+          return res.redirect(`/payment/initiate?orderId=${orderId}`);
+        }
+      } catch (err) {
+        logger.error({ err, orderId }, 'Failed to refresh payment session');
+      }
+      
+      return res.status(500).send(renderErrorPage(
+        'Payment Session Expired',
+        'Your payment session has expired or is invalid. Please go back to the app and try again.'
+      ));
     }
 
-    const appId = process.env.CASHFREE_APP_ID;
-    const secretKey = process.env.CASHFREE_SECRET_KEY;
-    const isTestMode = appId?.includes('TEST') || secretKey?.includes('_test_') || secretKey?.includes('test');
+    // Determine environment (sandbox vs production)
+    const appId = process.env.CASHFREE_APP_ID || '';
+    const secretKey = process.env.CASHFREE_SECRET_KEY || '';
+    const isTestMode = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
+    const environment = isTestMode ? 'sandbox' : 'production';
 
     logger.info({
       orderId,
       paymentSessionId: paymentSessionId.substring(0, 20) + '...',
-      environment: isTestMode ? 'sandbox' : 'production'
-    }, 'Serving Drop component payment page');
+      environment,
+      amount: payment.amount,
+    }, 'Serving payment page');
 
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Complete Payment</title>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
-            min-height: 100vh;
-          }
-          .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 1.5rem;
-            text-align: center;
-          }
-          .header h1 {
-            font-size: 1.3rem;
-            margin-bottom: 0.5rem;
-          }
-          .header .order-id {
-            font-size: 0.85rem;
-            opacity: 0.9;
-          }
-          #payment-container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: white;
-            min-height: 400px;
-          }
-          .loading {
-            text-align: center;
-            padding: 3rem 1rem;
-          }
-          .spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 1rem;
-          }
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-          .error {
-            background: #fee;
-            border: 1px solid #fcc;
-            color: #c33;
-            padding: 1.5rem;
-            margin: 2rem;
-            border-radius: 8px;
-            text-align: center;
-          }
-          .retry-btn {
-            display: inline-block;
-            margin-top: 1rem;
-            padding: 0.75rem 2rem;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1rem;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>🔒 Secure Payment</h1>
-          <div class="order-id">Order ID: ${orderId}</div>
-        </div>
+    // Render the payment page with Cashfree Drop component
+    res.send(renderPaymentPage({
+      orderId,
+      paymentSessionId,
+      environment,
+      amount: payment.amount,
+      planName: (payment as any).planId?.name || 'Coin Pack',
+    }));
 
+  } catch (error) {
+    logger.error({ error }, 'Error in payment initiation');
+    res.status(500).send(renderErrorPage(
+      'Server Error',
+      'An unexpected error occurred. Please try again later.'
+    ));
+  }
+});
+
+/**
+ * Payment Success Page
+ * Shown after successful payment, redirects to mobile app
+ */
+router.get('/success', async (req: Request, res: Response) => {
+  const { orderId, order_id } = req.query;
+  const finalOrderId = (orderId || order_id || '') as string;
+  
+  logger.info({ orderId: finalOrderId }, 'Payment success redirect');
+
+  // Verify payment status if we have an order ID
+  let verifiedStatus = 'unknown';
+  if (finalOrderId) {
+    try {
+      const payment = await Payment.findOne({ 
+        $or: [{ orderId: finalOrderId }, { cashfreeOrderId: finalOrderId }]
+      });
+      if (payment) {
+        verifiedStatus = payment.status;
+      }
+    } catch (err) {
+      logger.warn({ err, orderId: finalOrderId }, 'Could not verify payment status');
+    }
+  }
+
+  const deepLink = `bestie://payment/success?orderId=${finalOrderId}&status=${verifiedStatus}`;
+
+  res.send(renderSuccessPage(finalOrderId, deepLink));
+});
+
+/**
+ * Payment Failure Page
+ * Shown after failed payment, redirects to mobile app
+ */
+router.get('/failure', (req: Request, res: Response) => {
+  const { orderId, order_id, error_code, error_description } = req.query;
+  const finalOrderId = (orderId || order_id || '') as string;
+  
+  logger.info({ 
+    orderId: finalOrderId, 
+    error_code, 
+    error_description 
+  }, 'Payment failure redirect');
+
+  const deepLink = `bestie://payment/failure?orderId=${finalOrderId}&error=${error_code || 'unknown'}`;
+
+  res.send(renderFailurePage(finalOrderId, deepLink, error_description as string));
+});
+
+/**
+ * Payment Status API
+ * Can be used by mobile app to poll for payment status
+ */
+router.get('/status/:orderId', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    
+    const payment = await Payment.findOne({ 
+      $or: [{ orderId }, { cashfreeOrderId: orderId }]
+    });
+
+    if (!payment) {
+      return res.status(404).json({ success: false, error: 'Payment not found' });
+    }
+
+    // If still pending, check with Cashfree
+    if (payment.status === PaymentStatus.PENDING) {
+      try {
+        const cfStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+        if (cfStatus?.order_status === 'PAID') {
+          payment.status = PaymentStatus.SUCCESS;
+          await payment.save();
+        } else if (cfStatus?.order_status === 'EXPIRED') {
+          payment.status = PaymentStatus.FAILED;
+          payment.failureReason = 'Payment expired';
+          await payment.save();
+        }
+      } catch (err) {
+        logger.warn({ err, orderId }, 'Could not check Cashfree status');
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        orderId: payment.orderId,
+        status: payment.status,
+        amount: payment.amount,
+        coins: payment.coins,
+      },
+    });
+  } catch (error) {
+    logger.error({ error }, 'Error checking payment status');
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// ============================================
+// HTML RENDERING HELPERS
+// ============================================
+
+function renderPaymentPage(options: {
+  orderId: string;
+  paymentSessionId: string;
+  environment: 'sandbox' | 'production';
+  amount: number;
+  planName: string;
+}): string {
+  const { orderId, paymentSessionId, environment, amount, planName } = options;
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Complete Payment - Bestie</title>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+          background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+          min-height: 100vh;
+        }
+        .header {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 1.5rem;
+          text-align: center;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+          font-size: 1.25rem;
+          margin-bottom: 0.5rem;
+        }
+        .header .order-info {
+          font-size: 0.85rem;
+          opacity: 0.9;
+        }
+        .header .amount {
+          font-size: 1.5rem;
+          font-weight: bold;
+          margin-top: 0.5rem;
+        }
+        .container {
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 1rem;
+        }
+        #payment-container {
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+          min-height: 400px;
+          margin-top: 1rem;
+          overflow: hidden;
+        }
+        .loading {
+          text-align: center;
+          padding: 3rem 1rem;
+        }
+        .spinner {
+          width: 48px;
+          height: 48px;
+          border: 4px solid #f3f3f3;
+          border-top: 4px solid #667eea;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin: 0 auto 1rem;
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        .error-box {
+          background: #fee;
+          border: 1px solid #fcc;
+          color: #c33;
+          padding: 1.5rem;
+          margin: 1rem;
+          border-radius: 8px;
+          text-align: center;
+        }
+        .error-box h3 { margin-bottom: 0.5rem; }
+        .retry-btn {
+          display: inline-block;
+          margin-top: 1rem;
+          padding: 0.75rem 2rem;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 1rem;
+          text-decoration: none;
+        }
+        .retry-btn:hover { opacity: 0.9; }
+        .secure-badge {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          margin-top: 1rem;
+          color: #666;
+          font-size: 0.85rem;
+        }
+        .secure-badge svg {
+          width: 16px;
+          height: 16px;
+        }
+        .env-badge {
+          display: inline-block;
+          padding: 2px 8px;
+          background: ${environment === 'production' ? '#28a745' : '#ffc107'};
+          color: ${environment === 'production' ? 'white' : 'black'};
+          font-size: 0.7rem;
+          border-radius: 4px;
+          margin-left: 8px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>🔒 Secure Payment <span class="env-badge">${environment.toUpperCase()}</span></h1>
+        <div class="order-info">Order: ${orderId}</div>
+        <div class="amount">₹${amount} - ${planName}</div>
+      </div>
+
+      <div class="container">
         <div id="payment-container">
           <div class="loading">
             <div class="spinner"></div>
             <p>Loading payment options...</p>
           </div>
         </div>
-
-        <script>
-          const SESSION_ID = "${paymentSessionId}";
-          const MODE = "${isTestMode ? 'sandbox' : 'production'}";
-          
-          console.log('Payment Drop page loaded');
-          console.log('Session ID:', SESSION_ID.substring(0, 20) + '...');
-          console.log('Mode:', MODE);
-          
-          function showError(msg) {
-            document.getElementById('payment-container').innerHTML = 
-              '<div class="error">' +
-              '<strong>Payment Error</strong><br>' +
-              msg +
-              '<br><button class="retry-btn" onclick="location.reload()">Retry</button>' +
-              '</div>';
-          }
-          
-          window.addEventListener('load', function() {
-            setTimeout(function() {
-              try {
-                if (typeof Cashfree === 'undefined') {
-                  showError('Payment gateway failed to load. Please check your connection and try again.');
-                  return;
-                }
-                
-                console.log('Initializing Cashfree Drop component...');
-                const cashfree = Cashfree({ mode: MODE });
-                
-                const dropConfig = {
-                  paymentSessionId: SESSION_ID,
-                  redirectTarget: "_self"
-                };
-                
-                console.log('Rendering Drop component...');
-                cashfree.drop(document.getElementById("payment-container"), dropConfig)
-                  .then(function(drop) {
-                    console.log('Drop component rendered successfully');
-                  })
-                  .catch(function(error) {
-                    console.error('Drop component error:', error);
-                    showError('Failed to load payment options. ' + (error.message || 'Please try again.'));
-                  });
-                  
-              } catch (error) {
-                console.error('Exception:', error);
-                showError('An unexpected error occurred. Please try again.');
-              }
-            }, 500);
-          });
-        </script>
-      </body>
-      </html>
-    `);
-  } catch (error) {
-    logger.error({ error }, 'Error in payment initiation');
-    res.status(500).send('Error processing payment');
-  }
-});
-
-router.get('/success', (req: Request, res: Response) => {
-  const { orderId } = req.query;
-  const deepLink = `bestie://payment/success?orderId=${orderId || ''}`;
-
-  res.send(`
-    <!DOCTYPE HTML>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Payment Successful</title>
-        <style>
-          body {
-            font-family: sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            margin: 0;
-          }
-          .container { text-align: center; padding: 2rem; }
-          .icon { font-size: 4rem; margin-bottom: 1rem; }
-          .button {
-            display: inline-block;
-            margin-top: 1.5rem;
-            padding: 0.75rem 2rem;
-            background: white;
-            color: #667eea;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: 600;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="icon">✅</div>
-          <h1>Payment Successful!</h1>
-          <p>Redirecting to app...</p>
-          <a href="${deepLink}" class="button">Open Bestie App</a>
+        
+        <div class="secure-badge">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+          </svg>
+          Secured by Cashfree Payments
         </div>
-        <script>
-          setTimeout(() => window.location.href = '${deepLink}', 1000);
-        </script>
-      </body>
+      </div>
+
+      <script>
+        const SESSION_ID = "${paymentSessionId}";
+        const ORDER_ID = "${orderId}";
+        const MODE = "${environment}";
+        
+        console.log('[Payment] Page loaded');
+        console.log('[Payment] Environment:', MODE);
+        console.log('[Payment] Order ID:', ORDER_ID);
+        console.log('[Payment] Session ID:', SESSION_ID.substring(0, 30) + '...');
+        
+        function showError(title, message) {
+          document.getElementById('payment-container').innerHTML = 
+            '<div class="error-box">' +
+            '<h3>' + title + '</h3>' +
+            '<p>' + message + '</p>' +
+            '<button class="retry-btn" onclick="location.reload()">Retry</button>' +
+            '</div>';
+        }
+        
+        function initPayment() {
+          try {
+            if (typeof Cashfree === 'undefined') {
+              console.error('[Payment] Cashfree SDK not loaded');
+              showError('SDK Load Error', 'Payment gateway failed to load. Please check your internet connection and try again.');
+              return;
+            }
+            
+            console.log('[Payment] Initializing Cashfree SDK...');
+            const cashfree = Cashfree({ mode: MODE });
+            
+            const dropConfig = {
+              paymentSessionId: SESSION_ID,
+              redirectTarget: "_self",
+            };
+            
+            console.log('[Payment] Rendering Drop component...');
+            cashfree.drop(document.getElementById("payment-container"), dropConfig)
+              .then(function(result) {
+                console.log('[Payment] Drop rendered successfully', result);
+              })
+              .catch(function(error) {
+                console.error('[Payment] Drop error:', error);
+                const errorMessage = error?.message || error?.code || 'Unknown error occurred';
+                showError('Payment Load Error', errorMessage + '. Please try again.');
+              });
+              
+          } catch (error) {
+            console.error('[Payment] Exception:', error);
+            showError('Initialization Error', 'An unexpected error occurred. Please refresh and try again.');
+          }
+        }
+        
+        // Initialize after SDK loads
+        if (document.readyState === 'complete') {
+          setTimeout(initPayment, 500);
+        } else {
+          window.addEventListener('load', function() {
+            setTimeout(initPayment, 500);
+          });
+        }
+        
+        // Fallback: retry after 3 seconds if still loading
+        setTimeout(function() {
+          if (document.querySelector('.loading')) {
+            console.log('[Payment] Fallback initialization...');
+            initPayment();
+          }
+        }, 3000);
+      </script>
+    </body>
     </html>
-  `);
-});
+  `;
+}
 
-router.get('/failure', (req: Request, res: Response) => {
-  const { orderId } = req.query;
-  const deepLink = `bestie://payment/failure?orderId=${orderId || ''}`;
-
-  res.send(`
+function renderSuccessPage(orderId: string, deepLink: string): string {
+  return `
     <!DOCTYPE html>
     <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Payment Failed</title>
-        <style>
-          body {
-            font-family: sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-            margin: 0;
-          }
-          .container { text-align: center; padding: 2rem; }
-          .icon { font-size: 4rem; margin-bottom: 1rem; }
-          .button {
-            display: inline-block;
-            margin-top: 1.5rem;
-            padding: 0.75rem 2rem;
-            background: white;
-            color: #f5576c;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: 600;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="icon">❌</div>
-          <h1>Payment Failed</h1>
-          <p>Redirecting to app...</p>
-          <a href="${deepLink}" class="button">Open Bestie App</a>
-        </div>
-        <script>
-          setTimeout(() => window.location.href = '${deepLink}', 1000);
-        </script>
-      </body>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Payment Successful - Bestie</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 100vh;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+        }
+        .container {
+          text-align: center;
+          padding: 2rem;
+          max-width: 400px;
+        }
+        .icon {
+          width: 80px;
+          height: 80px;
+          background: rgba(255,255,255,0.2);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 1.5rem;
+          font-size: 2.5rem;
+        }
+        h1 {
+          font-size: 1.5rem;
+          margin-bottom: 0.5rem;
+        }
+        .order-id {
+          font-size: 0.85rem;
+          opacity: 0.8;
+          margin-bottom: 1rem;
+        }
+        .message {
+          margin-bottom: 1.5rem;
+          opacity: 0.9;
+        }
+        .button {
+          display: inline-block;
+          padding: 0.875rem 2rem;
+          background: white;
+          color: #667eea;
+          text-decoration: none;
+          border-radius: 8px;
+          font-weight: 600;
+          transition: transform 0.2s;
+        }
+        .button:hover {
+          transform: scale(1.05);
+        }
+        .spinner {
+          width: 20px;
+          height: 20px;
+          border: 2px solid rgba(255,255,255,0.3);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          display: inline-block;
+          margin-right: 8px;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        .redirect-msg {
+          margin-top: 1.5rem;
+          font-size: 0.85rem;
+          opacity: 0.8;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="icon">✅</div>
+        <h1>Payment Successful!</h1>
+        <p class="order-id">Order: ${orderId}</p>
+        <p class="message">Your coins have been added to your account.</p>
+        <a href="${deepLink}" class="button">Open Bestie App</a>
+        <p class="redirect-msg">
+          <span class="spinner"></span>
+          Redirecting to app...
+        </p>
+      </div>
+      <script>
+        // Attempt redirect after a short delay
+        setTimeout(function() {
+          window.location.href = '${deepLink}';
+        }, 1500);
+        
+        // Fallback: try again after 3 seconds
+        setTimeout(function() {
+          window.location.href = '${deepLink}';
+        }, 3500);
+      </script>
+    </body>
     </html>
-  `);
-});
+  `;
+}
+
+function renderFailurePage(orderId: string, deepLink: string, errorDesc?: string): string {
+  const errorMessage = errorDesc || 'Your payment could not be completed.';
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Payment Failed - Bestie</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 100vh;
+          background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+          color: white;
+        }
+        .container {
+          text-align: center;
+          padding: 2rem;
+          max-width: 400px;
+        }
+        .icon {
+          width: 80px;
+          height: 80px;
+          background: rgba(255,255,255,0.2);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 1.5rem;
+          font-size: 2.5rem;
+        }
+        h1 {
+          font-size: 1.5rem;
+          margin-bottom: 0.5rem;
+        }
+        .order-id {
+          font-size: 0.85rem;
+          opacity: 0.8;
+          margin-bottom: 1rem;
+        }
+        .message {
+          margin-bottom: 1.5rem;
+          opacity: 0.9;
+        }
+        .button {
+          display: inline-block;
+          padding: 0.875rem 2rem;
+          background: white;
+          color: #f5576c;
+          text-decoration: none;
+          border-radius: 8px;
+          font-weight: 600;
+          transition: transform 0.2s;
+        }
+        .button:hover {
+          transform: scale(1.05);
+        }
+        .redirect-msg {
+          margin-top: 1.5rem;
+          font-size: 0.85rem;
+          opacity: 0.8;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="icon">❌</div>
+        <h1>Payment Failed</h1>
+        <p class="order-id">Order: ${orderId}</p>
+        <p class="message">${errorMessage}</p>
+        <a href="${deepLink}" class="button">Back to App</a>
+        <p class="redirect-msg">Redirecting to app...</p>
+      </div>
+      <script>
+        setTimeout(function() {
+          window.location.href = '${deepLink}';
+        }, 2000);
+      </script>
+    </body>
+    </html>
+  `;
+}
+
+function renderErrorPage(title: string, message: string): string {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${title} - Bestie</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 100vh;
+          background: #f5f5f5;
+          color: #333;
+        }
+        .container {
+          text-align: center;
+          padding: 2rem;
+          max-width: 400px;
+        }
+        .icon {
+          font-size: 4rem;
+          margin-bottom: 1rem;
+        }
+        h1 {
+          font-size: 1.5rem;
+          margin-bottom: 1rem;
+          color: #333;
+        }
+        .message {
+          color: #666;
+          margin-bottom: 1.5rem;
+          line-height: 1.5;
+        }
+        .button {
+          display: inline-block;
+          padding: 0.875rem 2rem;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          text-decoration: none;
+          border-radius: 8px;
+          font-weight: 600;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="icon">⚠️</div>
+        <h1>${title}</h1>
+        <p class="message">${message}</p>
+        <a href="bestie://home" class="button">Back to App</a>
+      </div>
+    </body>
+    </html>
+  `;
+}
 
 export default router;

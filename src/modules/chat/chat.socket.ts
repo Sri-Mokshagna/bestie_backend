@@ -55,8 +55,15 @@ export function initializeChatSocket(io: SocketServer) {
       socket.userId = user._id.toString();
       logger.info({ msg: 'Socket authenticated', userId: socket.userId });
       next();
-    } catch (error) {
-      logger.error({ msg: 'Socket authentication error', error });
+    } catch (error: any) {
+      logger.error({ msg: 'Socket authentication error', error: error.message, code: error.code });
+      
+      // Check if it's a token expiration error
+      if (error.code === 'auth/id-token-expired') {
+        logger.warn({ msg: 'Firebase ID token expired during socket authentication' });
+        return next(new Error('Firebase ID token expired. Please refresh your token and reconnect.'));
+      }
+      
       next(new Error('Authentication error'));
     }
   });
