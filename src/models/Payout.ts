@@ -5,18 +5,14 @@ export enum PayoutStatus {
   PROCESSING = 'processing',
   COMPLETED = 'completed',
   FAILED = 'failed',
-  REJECTED = 'rejected',
 }
 
 export interface IPayout extends Document {
   responderId: Types.ObjectId;
   coins: number;
   amountINR: number;
-  upiId: string;
   status: PayoutStatus;
   gatewayResponse?: Record<string, any>;
-  rejectionReason?: string;
-  rejectedAt?: Date;
   createdAt: Date;
   completedAt?: Date;
 }
@@ -39,22 +35,12 @@ const payoutSchema = new Schema<IPayout>(
       required: true,
       min: 0,
     },
-    upiId: {
-      type: String,
-      required: true,
-      trim: true,
-    },
     status: {
       type: String,
       enum: Object.values(PayoutStatus),
       default: PayoutStatus.PENDING,
     },
     gatewayResponse: Schema.Types.Mixed,
-    rejectionReason: {
-      type: String,
-      trim: true,
-    },
-    rejectedAt: Date,
     completedAt: Date,
   },
   {

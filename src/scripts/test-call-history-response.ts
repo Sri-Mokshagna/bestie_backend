@@ -46,13 +46,13 @@ async function testCallHistoryResponse() {
             console.log(`      id: ${call.user.id}`);
             console.log(`      name: "${call.user.name}"`);
             console.log(`      phone: "${call.user.phone}"`);
-            console.log(`      avatar: ${call.user.avatar}`);
+            console.log(`      avatar: ${call.user.profile?.avatar || 'N/A'}`);
 
             console.log('\n   🎯 Responder Data:');
             console.log(`      id: ${call.responder.id}`);
             console.log(`      name: "${call.responder.name}"`);
             console.log(`      phone: "${call.responder.phone}"`);
-            console.log(`      avatar: ${call.responder.avatar}`);
+            console.log(`      avatar: ${call.responder.profile?.avatar || 'N/A'}`);
 
             // Check for issues
             const issues = [];

@@ -4,37 +4,33 @@ import { User, UserRole, UserStatus } from '../../models/User';
 import { Chat, Message, MessageType } from '../../models/Chat';
 import { Transaction, TransactionType, TransactionStatus } from '../../models/Transaction';
 import { Responder } from '../../models/Responder';
+import { CommissionConfig } from '../../models/CommissionConfig';
 import { AppError } from '../../middleware/errorHandler';
 import { logger } from '../../lib/logger';
 import { emitToUser } from '../../lib/socket';
 import { coinService } from '../../services/coinService';
-import { commissionService } from '../../services/commissionService';
-import { pushNotificationService } from '../../services/pushNotificationService';
 
 // Store active call timers to cancel if call ends early
 const callTimers = new Map<string, NodeJS.Timeout>();
 
 export const callService = {
   async initiateCall(userId: string, responderId: string, type: CallType) {
-    // PERFORMANCE: Parallel fetch of user and config
-    const [user, config] = await Promise.all([
-      User.findById(userId),
-      coinService.getConfig(),
-    ]);
-
+    // Verify user exists
+    const user = await User.findById(userId);
     if (!user) {
       throw new AppError(404, 'User not found');
     }
 
     // Check if call type is enabled
     const featureName = type === CallType.AUDIO ? 'audioCall' : 'videoCall';
-    const isEnabled = type === CallType.AUDIO ? config.audioCallEnabled : config.videoCallEnabled;
+    const isEnabled = await coinService.isFeatureEnabled(featureName);
     if (!isEnabled) {
       throw new AppError(403, `${type} calls are currently disabled`, 'FEATURE_DISABLED');
     }
 
     // Check if user has sufficient coins for at least 1 minute
     const minDuration = 60; // 1 minute in seconds
+    const config = await coinService.getConfig();
     const ratePerMinute = type === CallType.AUDIO
       ? config.audioCallCoinsPerMinute
       : config.videoCallCoinsPerMinute;
@@ -48,11 +44,8 @@ export const callService = {
       );
     }
 
-    // PERFORMANCE: Parallel fetch of responder user and profile
-    const [responderUser, responderProfile] = await Promise.all([
-      User.findById(responderId),
-      Responder.findOne({ userId: responderId }),
-    ]);
+    // Verify responder exists and has correct role
+    const responderUser = await User.findById(responderId);
     if (!responderUser) {
       throw new AppError(404, 'Responder not found');
     }
@@ -65,49 +58,23 @@ export const callService = {
       throw new AppError(400, 'Responder account is not active');
     }
 
-    // Check if responder is online - consider both isOnline AND availability flags
-    const hasAnyAvailabilityEnabled = responderUser.audioEnabled || responderUser.videoEnabled || responderUser.chatEnabled;
-    const effectivelyOnline = responderUser.isOnline || hasAnyAvailabilityEnabled;
-    
-    if (!effectivelyOnline) {
+    // Check if responder is online
+    if (!responderUser.isOnline) {
       throw new AppError(400, 'Responder is currently offline', 'RESPONDER_OFFLINE');
     }
 
     // Check if responder is available for this type of call
-    // Lazy-create Responder document if missing to handle edge cases
-    let responderProfileDoc = responderProfile;
-
-    if (!responderProfileDoc) {
-      // Create missing Responder document with default settings from User model
-      logger.warn({ responderId }, 'Responder profile missing during call initiation, creating with defaults');
-
-      responderProfileDoc = await Responder.create({
-        userId: responderId,
-        isOnline: responderUser.isOnline,
-        kycStatus: 'verified', // Assume verified since they're an active responder
-        earnings: {
-          totalCoins: 0,
-          pendingCoins: 0,
-          lockedCoins: 0,
-          redeemedCoins: 0,
-        },
-        rating: 0,
-        audioEnabled: responderUser.audioEnabled ?? true,
-        videoEnabled: responderUser.videoEnabled ?? true,
-        chatEnabled: responderUser.chatEnabled ?? true,
-      });
-    }
-
-    // Now ALWAYS check availability (document guaranteed to exist)
-    if (type === CallType.AUDIO && !responderProfileDoc.audioEnabled) {
-      throw new AppError(400, 'Responder is not available for audio calls', 'RESPONDER_NOT_AVAILABLE');
-    }
-    if (type === CallType.VIDEO && !responderProfileDoc.videoEnabled) {
-      throw new AppError(400, 'Responder is not available for video calls', 'RESPONDER_NOT_AVAILABLE');
-    }
-    // Check inCall status from both User and Responder models
-    if (responderProfileDoc.inCall || responderUser.inCall) {
-      throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
+    const responderProfile = await Responder.findOne({ userId: responderId });
+    if (responderProfile) {
+      if (type === CallType.AUDIO && !responderProfile.audioEnabled) {
+        throw new AppError(400, 'Responder is not available for audio calls', 'RESPONDER_NOT_AVAILABLE');
+      }
+      if (type === CallType.VIDEO && !responderProfile.videoEnabled) {
+        throw new AppError(400, 'Responder is not available for video calls', 'RESPONDER_NOT_AVAILABLE');
+      }
+      if (responderProfile.inCall) {
+        throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
+      }
     }
 
     // Check if responder has blocked this user
@@ -176,24 +143,7 @@ export const callService = {
       receiverName,
     });
 
-    // ADDITIVE: Send push notification for background/killed app
-    // This runs asynchronously and doesn't block the response
-    // If it fails, socket notification still works for foreground apps
-    if (responderUser.fcmToken) {
-      pushNotificationService.sendIncomingCallNotification(
-        responderUser.fcmToken,
-        {
-          callId: String(call._id),
-          callerId: userId,
-          callerName,
-          callType: type === CallType.AUDIO ? 'audio' : 'video',
-          zegoRoomId: call.zegoRoomId,
-        }
-      ).catch(err => {
-        // Log but don't fail the call initiation
-        logger.warn({ error: err, callId: String(call._id) }, 'Push notification failed (non-blocking)');
-      });
-    }
+    // TODO: Send push notification to responder (for when app is in background)
 
     return call;
   },
@@ -268,10 +218,6 @@ export const callService = {
     call.maxDurationSeconds = maxDurationSeconds;
     call.initialCoinBalance = user.coinBalance;
     await call.save();
-
-    // Set inCall flag for responder in both User and Responder models
-    await User.findByIdAndUpdate(call.responderId, { inCall: true });
-    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: true });
 
     // Notify both parties that call is now active with max duration AND server start time
     const startTimeMs = call.startTime.getTime();
@@ -366,8 +312,9 @@ export const callService = {
       user.coinBalance -= actualDeduction;
       await user.save();
 
-      // Get commission config (cached)
-      const responderPercentage = await commissionService.getResponderPercentage();
+      // Get commission config
+      const commissionConfig = await CommissionConfig.findOne({ isActive: true });
+      const responderPercentage = commissionConfig?.responderCommissionPercentage || 50;
 
       // Calculate responder earnings
       const responderCoins = Math.floor(actualDeduction * (responderPercentage / 100));
@@ -427,10 +374,6 @@ export const callService = {
     call.durationSeconds = durationSeconds;
     await call.save();
 
-    // Reset inCall flag for responder in both User and Responder models
-    await User.findByIdAndUpdate(call.responderId, { inCall: false });
-    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
-
     // Create call history message
     await this.createCallMessage(call);
   },
@@ -450,10 +393,6 @@ export const callService = {
     call.status = CallStatus.ENDED;
     call.endTime = new Date();
     await call.save();
-
-    // Reset inCall flag for responder (call never truly connected, but safety reset)
-    await User.findByIdAndUpdate(call.responderId, { inCall: false });
-    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
 
     // Notify both parties about connection failure
     emitToUser(call.userId.toString(), 'call_ended', {
@@ -489,10 +428,6 @@ export const callService = {
     call.endTime = new Date();
     await call.save();
 
-    // Reset inCall flag for responder if it was set during RINGING
-    await User.findByIdAndUpdate(call.responderId, { inCall: false });
-    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
-
     // Notify caller that call was rejected
     emitToUser(call.userId.toString(), 'call_ended', {
       callId: String(call._id),
@@ -527,14 +462,7 @@ export const callService = {
 
     if (call.status === CallStatus.ENDED) {
       logger.warn({ callId, userId, status: call.status }, '⚠️ Call already ended');
-      // Don't throw error, just emit events to ensure both clients are notified
-      emitToUser(call.userId.toString(), 'call_ended', {
-        callId: String(call._id),
-      });
-      emitToUser(call.responderId.toString(), 'call_ended', {
-        callId: String(call._id),
-      });
-      return call;
+      throw new AppError(400, 'Call already ended');
     }
 
     logger.info({
@@ -553,33 +481,22 @@ export const callService = {
       logger.info({ callId: String(call._id) }, 'Cancelled scheduled call termination');
     }
 
-    // PERFORMANCE FIX: Emit socket events IMMEDIATELY before any slow operations
-    // This ensures the remote party can navigate away instantly
+    // Calculate actual duration and deduct coins
+    await this.endCallAndDeductCoins(call);
+
     logger.info({
       callId: String(call._id),
       caller: call.userId.toString(),
       responder: call.responderId.toString()
-    }, '📤 Emitting call_ended events IMMEDIATELY to both parties');
+    }, '📤 Emitting call_ended events to both parties');
 
-    try {
-      emitToUser(call.userId.toString(), 'call_ended', {
-        callId: String(call._id),
-      });
-      emitToUser(call.responderId.toString(), 'call_ended', {
-        callId: String(call._id),
-      });
-      logger.info({ callId: String(call._id) }, '✅ Call ended events emitted successfully');
-    } catch (error: any) {
-      logger.error({ error: error.message, callId: String(call._id) }, '❌ Failed to emit call_ended events');
-    }
-
-    // Now do the slow coin deduction in background (non-blocking for the caller)
-    // Calculate actual duration and deduct coins
-    try {
-      await this.endCallAndDeductCoins(call);
-    } catch (error: any) {
-      logger.error({ error: error.message, callId: String(call._id) }, 'Error in endCallAndDeductCoins');
-    }
+    // Emit socket event to both parties that call has ended
+    emitToUser(call.userId.toString(), 'call_ended', {
+      callId: String(call._id),
+    });
+    emitToUser(call.responderId.toString(), 'call_ended', {
+      callId: String(call._id),
+    });
 
     logger.info({ callId: String(call._id) }, '✅ Call ended successfully');
 
@@ -627,68 +544,82 @@ export const callService = {
   },
 
   async getCallHistory(userId: string) {
-    // PERFORMANCE: Use lean() and batch lookup instead of populate
+    // Find all calls where user was involved (as user or responder)
     const calls = await Call.find({
       $or: [
-        { userId },
+        { userId: userId },
         { responderId: userId },
       ],
       status: { $in: [CallStatus.ENDED, CallStatus.REJECTED, CallStatus.MISSED] },
     })
+      .populate({
+        path: 'userId',
+        select: 'profile phone role',
+        options: { strictPopulate: false }
+      })
+      .populate({
+        path: 'responderId',
+        select: 'profile phone role',
+        options: { strictPopulate: false }
+      })
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
 
-    if (calls.length === 0) {
-      return [];
-    }
-
-    // PERFORMANCE: Collect all unique user IDs and batch fetch
-    const userIdSet = new Set<string>();
-    calls.forEach(call => {
-      userIdSet.add(call.userId.toString());
-      userIdSet.add(call.responderId.toString());
-    });
-
-    const users = await User.find({ _id: { $in: Array.from(userIdSet) } })
-      .select('profile phone role')
-      .lean();
-
-    // Create lookup map
-    const userMap = new Map(users.map(u => [u._id.toString(), u]));
-
-    logger.info({
-      userId,
-      callCount: calls.length,
-    }, 'Call history retrieved with batch lookup');
-
-    // Format calls with user data from map
+    // Format calls with populated user data
     return calls.map(call => {
-      const userIdStr = call.userId.toString();
-      const responderIdStr = call.responderId.toString();
-      
-      const userDoc = userMap.get(userIdStr);
-      const responderDoc = userMap.get(responderIdStr);
+      // Handle user data
+      const userDoc = call.userId as any;
+      const user = userDoc?._id ? {
+        _id: userDoc._id,
+        profile: userDoc.profile || {},
+        phone: userDoc.phone || '',
+        role: userDoc.role
+      } : null;
 
-      // Extract user info
-      const userName = userDoc?.profile?.name?.trim() || userDoc?.phone || 'User';
-      const responderName = responderDoc?.profile?.name?.trim() || responderDoc?.phone || 'Responder';
+      // Handle responder data
+      const responderDoc = call.responderId as any;
+      const responder = responderDoc?._id ? {
+        _id: responderDoc._id,
+        profile: responderDoc.profile || {},
+        phone: responderDoc.phone || '',
+        role: responderDoc.role
+      } : null;
+
+      // Extract names with multiple fallback options
+      const userName = user?.profile?.name || user?.phone || 'User';
+      const responderName = responder?.profile?.name || responder?.phone || `Responder ${String(call.responderId).slice(-4)}`;
+
+      // Debug logging for missing names
+      if (!user) {
+        console.log('⚠️ User not found for call:', call._id, 'userId:', call.userId);
+      }
+      if (!responder) {
+        console.log('⚠️ Responder not found for call:', call._id, 'responderId:', call.responderId);
+      }
+      if (responder && !responder.profile?.name && !responder.phone) {
+        console.log('⚠️ Responder has no name or phone:', {
+          callId: call._id,
+          responderId: responder._id,
+          responderProfile: responder.profile,
+        });
+      }
 
       return {
         id: String(call._id),
-        userId: userIdStr,
-        responderId: responderIdStr,
+        userId: user?._id ? String(user._id) : String(call.userId),
+        responderId: responder?._id ? String(responder._id) : String(call.responderId),
         user: {
-          id: userIdStr,
+          id: user?._id ? String(user._id) : String(call.userId),
           name: userName,
-          phone: userDoc?.phone || '',
-          avatar: userDoc?.profile?.avatar || null,
+          phone: user?.phone || '',
+          profile: user?.profile || {},
         },
         responder: {
-          id: responderIdStr,
+          id: responder?._id ? String(responder._id) : String(call.responderId),
           name: responderName,
-          phone: responderDoc?.phone || '',
-          avatar: responderDoc?.profile?.avatar || null,
+          phone: responder?.phone || '',
+          profile: responder?.profile || {},
         },
         type: call.type,
         status: call.status,
@@ -741,32 +672,25 @@ export const callService = {
       call.endTime = now;
       await call.save();
       await this.createCallMessage(call);
-      
-      // Reset inCall flag for responder
-      await User.findByIdAndUpdate(call.responderId, { inCall: false });
-      await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
     }
 
-    // Find old active calls to mark as ended
-    const activeCalls = await Call.find({
-      status: CallStatus.ACTIVE,
-      startTime: { $lt: sixtySecondsAgo },
-    });
-
-    // Mark old active calls as ended and reset inCall flags
-    for (const call of activeCalls) {
-      call.status = CallStatus.ENDED;
-      call.endTime = now;
-      await call.save();
-      
-      // Reset inCall flag for responder
-      await User.findByIdAndUpdate(call.responderId, { inCall: false });
-      await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
-    }
+    // Mark old active calls as ended (shouldn't happen, but just in case)
+    const activeResult = await Call.updateMany(
+      {
+        status: CallStatus.ACTIVE,
+        startTime: { $lt: sixtySecondsAgo },
+      },
+      {
+        $set: {
+          status: CallStatus.ENDED,
+          endTime: now,
+        },
+      }
+    );
 
     return {
       ringingCallsCleaned: ringingCalls.length,
-      activeCallsCleaned: activeCalls.length,
+      activeCallsCleaned: activeResult.modifiedCount,
     };
   },
 

@@ -8,51 +8,31 @@ import { coinService } from './coinService';
 import { TransactionType } from '../models/Transaction';
 import { logger } from '../lib/logger';
 import { AppError } from '../middleware/errorHandler';
-import { parseCashfreeWebhook } from './paymentWebhookHandler';
 
-/**
- * Payment Service
- * Handles all payment-related operations including:
- * - Creating payment orders
- * - Processing webhooks
- * - Handling payment status updates
- * - Refunds
- */
 export class PaymentService {
-  /**
-   * Create a payment order for coin purchase
-   * This creates an order with Cashfree and returns a payment link
-   */
   async createPaymentOrder(userId: string, planId: string) {
     try {
-      // Fetch user
       const user = await User.findById(userId);
       if (!user) {
         throw new AppError(404, 'User not found');
       }
 
-      // Fetch and validate coin plan
       const plan = await CoinPlan.findById(planId);
       if (!plan || !plan.isActive) {
         throw new AppError(404, 'Coin plan not found or inactive');
       }
 
-      // Validate user has phone number (required for Cashfree)
       if (!user.phone) {
         throw new AppError(400, 'User phone number is required for payment');
       }
 
-      // Generate unique order ID
+      const customerEmail = user.profile?.email || `${user.phone.replace('+', '')}@bestie.app`;
       const orderId = `ORDER_${Date.now()}_${uuidv4().slice(0, 8)}`;
-      
-      // Generate email (use user's email or generate from phone)
-      const customerEmail = user.profile?.email || `user_${user.phone.replace(/\+/g, '')}@bestie.app`;
 
-      // Create payment record in database
       const payment = new Payment({
         userId: new Types.ObjectId(userId),
         orderId,
-        cashfreeOrderId: orderId, // Will be updated with Cashfree's order ID
+        cashfreeOrderId: orderId,
         planId: new Types.ObjectId(planId),
         amount: plan.priceINR,
         coins: plan.coins,
@@ -62,28 +42,15 @@ export class PaymentService {
 
       await payment.save();
 
-      // Get server URL for return/webhook URLs
-      const serverUrl = process.env.SERVER_URL || 
-        (process.env.NODE_ENV === 'production' 
-          ? 'https://bestie-backend-zmj2.onrender.com' 
-          : 'http://localhost:3000');
+      const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
 
-      logger.info({
-        userId,
-        orderId,
-        planId,
-        amount: plan.priceINR,
-        serverUrl,
-      }, 'Creating Cashfree order');
-
-      // Create order with Cashfree
       const result = await cashfreeService.createOrderAndGetLink({
         orderId,
         amount: plan.priceINR,
         currency: 'INR',
         customerDetails: {
           customerId: userId,
-          customerName: user.profile?.name || 'Bestie User',
+          customerName: user.profile?.name || 'User',
           customerEmail,
           customerPhone: user.phone,
         },
@@ -91,18 +58,11 @@ export class PaymentService {
         notifyUrl: `${serverUrl}/api/payments/webhook`,
       });
 
-      // Update payment record with Cashfree response
       payment.cashfreeOrderId = result.order.order_id;
-      payment.gatewayResponse = result.order; // Contains payment_session_id
+      payment.gatewayResponse = result.order;
       await payment.save();
 
-      logger.info({ 
-        userId, 
-        orderId, 
-        planId, 
-        cashfreeOrderId: result.order.order_id,
-        hasSessionId: !!result.order.payment_session_id,
-      }, '✅ Payment order created successfully');
+      logger.info({ userId, orderId, planId, paymentLink: result.payment_link }, 'Payment order and link created');
 
       return {
         orderId,
@@ -111,11 +71,9 @@ export class PaymentService {
         amount: plan.priceINR,
         coins: plan.coins,
         planName: plan.name,
-        // Include session ID for mobile apps that want to use native SDKs
-        paymentSessionId: result.payment_session_id,
       };
     } catch (error) {
-      logger.error({ error, userId, planId }, '❌ Failed to create payment order');
+      logger.error({ error, userId, planId }, 'Failed to create payment order');
       throw error;
     }
   }
@@ -127,11 +85,37 @@ export class PaymentService {
         throw new AppError(400, 'Invalid webhook signature');
       }
 
-      // Parse webhook using dedicated handler
-      const { order_id, payment_status, payment_method, cf_payment_id, ourOrderId } = parseCashfreeWebhook(webhookData);
+      // Parse webhook based on type
+      const webhookType = webhookData.type;
+      let order_id: string;
+      let payment_status: string;
+      let payment_method: any;
+      let cf_payment_id: string;
+      let ourOrderId: string | null = null;
+
+      if (webhookType === 'PAYMENT_SUCCESS_WEBHOOK' || webhookType === 'PAYMENT_FAILED_WEBHOOK') {
+        order_id = webhookData.data?.order?.order_id;
+        payment_status = webhookData.data?.payment?.payment_status;
+        payment_method = webhookData.data?.payment?.payment_method;
+        cf_payment_id = webhookData.data?.payment?.cf_payment_id;
+        if (webhookData.data?.order?.order_tags?.link_id) {
+          ourOrderId = webhookData.data.order.order_tags.link_id.replace(/^LINK_/, '');
+        }
+      } else if (webhookType === 'PAYMENT_LINK_EVENT') {
+        order_id = webhookData.data?.order?.order_id;
+        payment_status = webhookData.data?.order?.transaction_status === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
+        payment_method = null;
+        cf_payment_id = webhookData.data?.order?.transaction_id;
+        if (webhookData.data?.link_id) {
+          ourOrderId = webhookData.data.link_id.replace(/^LINK_/, '');
+        }
+      } else {
+        logger.warn({ webhookType }, 'Unknown webhook type');
+        return;
+      }
 
       logger.info({
-        webhookType: webhookData.type,
+        webhookType,
         cashfreeOrderId: order_id,
         ourOrderId,
         payment_status

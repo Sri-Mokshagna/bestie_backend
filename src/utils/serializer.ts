@@ -48,7 +48,6 @@ export function serializeUser(user: any) {
       bio: user.profile?.bio || null,
       avatar: user.profile?.avatar || null,
       gender: user.profile?.gender || null,
-      language: user.profile?.language || null,
       voiceText: user.profile?.voiceText || null,
       voiceBlob: user.profile?.voiceBlob || null,
     },

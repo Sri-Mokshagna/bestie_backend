@@ -34,7 +34,6 @@ export interface IResponder extends Document {
   kycStatus: KycStatus;
   kycDocs: IKycDocs;
   bankDetails?: string; // Encrypted JSON string
-  upiId?: string; // UPI ID for payouts
   earnings: IEarnings;
   rating: number;
   voiceGender: VoiceGender;
@@ -88,10 +87,6 @@ const responderSchema = new Schema<IResponder>(
       voiceProof: String,
     },
     bankDetails: String, // Encrypted
-    upiId: {
-      type: String,
-      trim: true,
-    },
     earnings: {
       totalCoins: { type: Number, default: 0 },
       pendingCoins: { type: Number, default: 0 },

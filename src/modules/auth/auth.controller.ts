@@ -138,29 +138,9 @@ export const authController = {
       throw new AppError(401, 'Not authenticated');
     }
 
-    // Clear FCM token on logout (optional - prevents notifications after logout)
-    await User.findByIdAndUpdate(req.user.id, { fcmToken: null });
+    // Optionally: Add token to blacklist in Redis
+    // For now, client-side token removal is sufficient
 
     res.json({ message: 'Logged out successfully' });
-  },
-
-  /**
-   * Register/update FCM token for push notifications
-   * This is ADDITIVE - doesn't affect existing functionality
-   */
-  async updateFcmToken(req: AuthRequest, res: Response) {
-    if (!req.user) {
-      throw new AppError(401, 'Not authenticated');
-    }
-
-    const { fcmToken } = req.body;
-    
-    if (!fcmToken || typeof fcmToken !== 'string') {
-      throw new AppError(400, 'Valid FCM token is required');
-    }
-
-    await User.findByIdAndUpdate(req.user.id, { fcmToken });
-
-    res.json({ success: true, message: 'FCM token registered' });
   },
 };

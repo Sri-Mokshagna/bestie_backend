@@ -40,7 +40,7 @@ const callSchema = new Schema<ICall>(
     },
     responderId: {
       type: Schema.Types.ObjectId,
-      ref: 'User',
+      ref: 'Responder',
       required: true,
     },
     type: {
@@ -77,9 +77,6 @@ const callSchema = new Schema<ICall>(
 // Indexes
 callSchema.index({ userId: 1, createdAt: -1 });
 callSchema.index({ responderId: 1, createdAt: -1 });
-callSchema.index({ responderId: 1, status: 1 }); // For checking active calls during initiation
-callSchema.index({ status: 1, createdAt: 1 }); // For cleanup queries
-callSchema.index({ userId: 1, status: 1 }); // For call history queries
 // Note: unique on zegoRoomId already creates an index
 
 export const Call = model<ICall>('Call', callSchema);
