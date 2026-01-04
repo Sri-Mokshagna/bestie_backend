@@ -20,11 +20,24 @@ router.get('/debug/:orderId', async (req: Request, res: Response) => {
     const hasCredentials = appId.length > 0 && secretKey.length > 0;
     const hasTestMarkers = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
     
+    // Also fetch order status from Cashfree
+    let cashfreeOrderStatus = null;
+    let cashfreeError = null;
+    if (payment?.cashfreeOrderId) {
+      try {
+        cashfreeOrderStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+      } catch (e: any) {
+        cashfreeError = e.message;
+      }
+    }
+    
     res.json({
       orderId,
       paymentFound: !!payment,
       storedEnvironment: payment?.gatewayResponse?._cashfree_environment || 'NOT_STORED',
-      paymentSessionId: payment?.gatewayResponse?.payment_session_id?.substring(0, 30) + '...' || 'NONE',
+      paymentSessionId: payment?.gatewayResponse?.payment_session_id || 'NONE',
+      sessionIdLength: payment?.gatewayResponse?.payment_session_id?.length || 0,
+      directCheckoutUrl: payment?.gatewayResponse?._direct_checkout_url || 'NOT_STORED',
       credentials: {
         hasCredentials,
         hasTestMarkers,
@@ -32,6 +45,8 @@ router.get('/debug/:orderId', async (req: Request, res: Response) => {
         detectedEnvironment: (!hasCredentials || hasTestMarkers) ? 'sandbox' : 'production',
       },
       paymentStatus: payment?.status,
+      cashfreeOrderStatus,
+      cashfreeError,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -233,11 +248,19 @@ router.get('/initiate', async (req: Request, res: Response) => {
       }, 'Detected environment from credentials (fallback)');
     }
 
+    // Build the checkout URL here for logging
+    const cashfreeBaseUrl = environment === 'production' 
+      ? 'https://payments.cashfree.com/order' 
+      : 'https://payments-test.cashfree.com/order';
+    const checkoutUrl = `${cashfreeBaseUrl}/#${paymentSessionId}`;
+    
     logger.info({
       orderId,
-      paymentSessionId: paymentSessionId.substring(0, 20) + '...',
+      paymentSessionId: paymentSessionId.substring(0, 30) + '...',
+      fullSessionIdLength: paymentSessionId.length,
       environment,
       amount: payment.amount,
+      checkoutUrl: checkoutUrl.substring(0, 80) + '...',
     }, 'Serving payment page');
 
     // Render the payment page with Cashfree Drop component

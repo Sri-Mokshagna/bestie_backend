@@ -337,6 +337,16 @@ class CashfreeService {
 
       const orderResponse = response.data;
 
+      // Log the full response for debugging
+      logger.info({
+        orderId: orderData.orderId,
+        responseKeys: Object.keys(orderResponse),
+        hasPaymentSessionId: !!orderResponse.payment_session_id,
+        hasPaymentLink: !!orderResponse.payment_link,
+        hasLinkUrl: !!orderResponse.link_url,
+        orderStatus: orderResponse.order_status,
+      }, 'Cashfree order response details');
+
       // Extract payment session ID (critical for Drop component)
       const paymentSessionId = orderResponse.payment_session_id;
       
@@ -351,12 +361,19 @@ class CashfreeService {
       // Generate payment URL that points to our redirect handler
       const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
       const paymentUrl = `${serverUrl}/payment/initiate?orderId=${orderData.orderId}`;
+      
+      // Also generate the direct Cashfree checkout URL
+      const directCheckoutUrl = config.isProduction
+        ? `https://payments.cashfree.com/order/#${paymentSessionId}`
+        : `https://payments-test.cashfree.com/order/#${paymentSessionId}`;
 
       logger.info({
         orderId: orderData.orderId,
         cashfreeOrderId: orderResponse.order_id,
         orderStatus: orderResponse.order_status,
         hasSessionId: !!paymentSessionId,
+        sessionIdLength: paymentSessionId?.length,
+        directCheckoutUrl,
         environment: config.isProduction ? 'PRODUCTION' : 'SANDBOX',
       }, '✅ Cashfree order created successfully');
 
@@ -365,8 +382,11 @@ class CashfreeService {
           ...orderResponse,
           // Store which environment this order was created in
           _cashfree_environment: config.isProduction ? 'production' : 'sandbox',
+          // Store the direct checkout URL for debugging
+          _direct_checkout_url: directCheckoutUrl,
         },
         payment_link: paymentUrl,
+        direct_checkout_url: directCheckoutUrl,
         link_id: orderData.orderId,
         payment_session_id: paymentSessionId,
       };
