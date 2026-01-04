@@ -361,7 +361,11 @@ class CashfreeService {
       }, '✅ Cashfree order created successfully');
 
       return {
-        order: orderResponse,
+        order: {
+          ...orderResponse,
+          // Store which environment this order was created in
+          _cashfree_environment: config.isProduction ? 'production' : 'sandbox',
+        },
         payment_link: paymentUrl,
         link_id: orderData.orderId,
         payment_session_id: paymentSessionId,

@@ -169,11 +169,38 @@ router.get('/initiate', async (req: Request, res: Response) => {
       ));
     }
 
-    // Determine environment (sandbox vs production)
-    const appId = process.env.CASHFREE_APP_ID || '';
-    const secretKey = process.env.CASHFREE_SECRET_KEY || '';
-    const isTestMode = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
-    const environment = isTestMode ? 'sandbox' : 'production';
+    // Determine environment - prefer stored environment from order creation
+    // This ensures we redirect to the same environment where the session was created
+    let environment: 'sandbox' | 'production' = 'sandbox';
+    
+    // First, check if environment was stored with the order
+    if (payment.gatewayResponse?._cashfree_environment) {
+      environment = payment.gatewayResponse._cashfree_environment;
+      logger.info({ orderId, storedEnvironment: environment }, 'Using stored environment from order');
+    } else {
+      // Fallback: detect from current credentials
+      const appId = process.env.CASHFREE_APP_ID || '';
+      const secretKey = process.env.CASHFREE_SECRET_KEY || '';
+      
+      // If credentials are empty or contain TEST/test markers, use sandbox
+      // Only use production if we have non-test credentials
+      const hasCredentials = appId.length > 0 && secretKey.length > 0;
+      const hasTestMarkers = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
+      
+      if (!hasCredentials || hasTestMarkers) {
+        environment = 'sandbox';
+      } else {
+        environment = 'production';
+      }
+      
+      logger.info({ 
+        orderId, 
+        detectedEnvironment: environment, 
+        hasCredentials,
+        hasTestMarkers,
+        appIdPrefix: appId.substring(0, 15) || '(empty)' 
+      }, 'Detected environment from credentials (fallback)');
+    }
 
     logger.info({
       orderId,
