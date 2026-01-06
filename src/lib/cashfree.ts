@@ -295,18 +295,14 @@ class CashfreeService {
       }
 
       // Prepare order payload
-      // When using JS SDK, include return_url for post-payment redirect
-      // When using direct redirect, omit return_url (pass undefined)
+      // return_url must be CLEAN - Cashfree injects order_id automatically
       const orderMeta: any = {
         notify_url: orderData.notifyUrl,
       };
       
-      // Only include return_url if provided (required for JS SDK approach)
+      // Include return_url as-is - DO NOT append any query params
       if (orderData.returnUrl) {
-        // Append order_id parameter to return URL
-        const returnUrlBase = orderData.returnUrl;
-        const returnUrlSeparator = returnUrlBase.includes('?') ? '&' : '?';
-        orderMeta.return_url = `${returnUrlBase}${returnUrlSeparator}order_id={order_id}`;
+        orderMeta.return_url = orderData.returnUrl;
       }
 
       const payload = {

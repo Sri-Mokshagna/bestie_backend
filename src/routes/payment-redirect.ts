@@ -103,7 +103,7 @@ async function recreatePaymentSession(payment: any): Promise<string | null> {
         customerEmail,
         customerPhone: user.phone || '',
       },
-      returnUrl: `${serverUrl}/payment/success?orderId=${payment.orderId}`,
+      returnUrl: `${serverUrl}/payment/success`,  // CLEAN - no query params!
       notifyUrl: `${serverUrl}/api/payments/webhook`,
     });
 
@@ -245,6 +245,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
 
 /**
  * Render Cashfree JS SDK checkout page
+ * MINIMAL implementation - NO retries, NO fallbacks
  */
 function renderCashfreeSDKPage(options: {
   orderId: string;
@@ -252,7 +253,7 @@ function renderCashfreeSDKPage(options: {
   environment: 'sandbox' | 'production';
   amount: number;
 }): string {
-  const { orderId, paymentSessionId, environment, amount } = options;
+  const { paymentSessionId, environment, amount } = options;
   
   return `
 <!DOCTYPE html>
@@ -261,8 +262,8 @@ function renderCashfreeSDKPage(options: {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Payment - Bestie</title>
+  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -270,149 +271,34 @@ function renderCashfreeSDKPage(options: {
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 20px;
+      margin: 0;
     }
     .container {
       background: white;
       border-radius: 20px;
       padding: 40px;
-      max-width: 400px;
-      width: 100%;
       text-align: center;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
     }
-    .logo { font-size: 48px; margin-bottom: 20px; }
-    h1 { color: #333; margin-bottom: 10px; font-size: 24px; }
-    .amount { font-size: 36px; color: #667eea; font-weight: bold; margin: 20px 0; }
-    .order-id { color: #888; font-size: 12px; margin-bottom: 30px; }
-    .status {
-      padding: 15px;
-      border-radius: 10px;
-      margin-bottom: 20px;
-      font-size: 16px;
-    }
-    .status.loading {
-      background: #e3f2fd;
-      color: #1976d2;
-    }
-    .status.error {
-      background: #ffebee;
-      color: #c62828;
-    }
-    .spinner {
-      display: inline-block;
-      width: 20px;
-      height: 20px;
-      border: 3px solid #1976d2;
-      border-radius: 50%;
-      border-top-color: transparent;
-      animation: spin 1s linear infinite;
-      margin-right: 10px;
-      vertical-align: middle;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .retry-btn {
-      display: none;
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 15px 40px;
-      border-radius: 30px;
-      font-size: 18px;
-      cursor: pointer;
-      margin-top: 20px;
-    }
-    .retry-btn:hover { background: #5a6fd6; }
+    .amount { font-size: 32px; color: #667eea; font-weight: bold; margin: 20px 0; }
+    .status { color: #666; }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="logo">\uD83D\uDC9C</div>
-    <h1>Complete Payment</h1>
+    <h2>Bestie Payment</h2>
     <div class="amount">\u20B9${amount}</div>
-    <div class="order-id">Order: ${orderId}</div>
-    <div class="status loading" id="status">
-      <span class="spinner"></span>
-      <span id="statusText">Initializing payment...</span>
-    </div>
-    <button class="retry-btn" id="retryBtn" onclick="startPayment()">Retry Payment</button>
+    <p class="status">Redirecting to secure payment...</p>
   </div>
 
-  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
   <script>
-    const paymentSessionId = "${paymentSessionId}";
-    const environment = "${environment}";
-    let cashfree = null;
-    let paymentAttempted = false;
-
-    function updateStatus(message, isError = false) {
-      const statusEl = document.getElementById('status');
-      const statusText = document.getElementById('statusText');
-      const retryBtn = document.getElementById('retryBtn');
-      
-      statusText.textContent = message;
-      statusEl.className = 'status ' + (isError ? 'error' : 'loading');
-      
-      if (isError) {
-        statusEl.innerHTML = message;
-        retryBtn.style.display = 'inline-block';
-      }
-    }
-
-    function startPayment() {
-      if (paymentAttempted) {
-        // If payment was already attempted, reload the page to get fresh session
-        window.location.reload();
-        return;
-      }
-      
-      paymentAttempted = true;
-      updateStatus('Opening payment gateway...');
-      document.getElementById('retryBtn').style.display = 'none';
-
-      try {
-        // Initialize Cashfree SDK
-        cashfree = Cashfree({ mode: environment });
-        
-        // Trigger checkout
-        cashfree.checkout({
-          paymentSessionId: paymentSessionId,
-          redirectTarget: "_self"
-        }).then(function(result) {
-          if (result.error) {
-            console.error('Payment error:', result.error);
-            updateStatus('Payment failed: ' + (result.error.message || 'Unknown error'), true);
-          } else if (result.paymentDetails) {
-            console.log('Payment success:', result.paymentDetails);
-            updateStatus('Payment successful! Redirecting...');
-          }
-        }).catch(function(error) {
-          console.error('Checkout error:', error);
-          updateStatus('Payment error: ' + (error.message || 'Please try again'), true);
-        });
-      } catch (error) {
-        console.error('SDK initialization error:', error);
-        updateStatus('Failed to load payment gateway. Please try again.', true);
-      }
-    }
-
-    // Auto-start payment when SDK is ready
-    if (typeof Cashfree !== 'undefined') {
-      setTimeout(startPayment, 500);
-    } else {
-      // Wait for SDK to load
-      let attempts = 0;
-      const checkSDK = setInterval(function() {
-        attempts++;
-        if (typeof Cashfree !== 'undefined') {
-          clearInterval(checkSDK);
-          setTimeout(startPayment, 300);
-        } else if (attempts > 20) {
-          clearInterval(checkSDK);
-          updateStatus('Failed to load payment SDK. Please check your internet connection.', true);
-        }
-      }, 250);
-    }
+    // Initialize and open checkout immediately - NO retries, NO fallbacks
+    const cashfree = Cashfree({ mode: "${environment}" });
+    
+    cashfree.checkout({
+      paymentSessionId: "${paymentSessionId}",
+      redirectTarget: "_self"
+    });
   </script>
 </body>
 </html>

@@ -93,18 +93,24 @@ export const walletController = {
 
     const result = await paymentService.createPaymentOrder(req.user.id, planId);
 
+    // Generate payment initiate URL for SDK checkout
+    const serverUrl = process.env.SERVER_URL || 'https://bestie-backend-zmj2.onrender.com';
+    const paymentInitiateUrl = `${serverUrl}/payment/initiate?orderId=${result.orderId}`;
+
     logger.info({
       orderId: result.orderId,
-      paymentLink: result.paymentLink
-    }, 'Payment link generated');
+      paymentInitiateUrl
+    }, 'Payment order created - SDK checkout ready');
 
     res.json({
       orderId: result.orderId,
-      payment_link: result.paymentLink,
-      link_id: result.linkId,
+      // App should open this URL in browser for SDK checkout
+      payment_link: paymentInitiateUrl,
       amount: result.amount,
       coins: result.coins,
       planName: result.planName,
+      // Also provide session ID if app wants to use native SDK
+      paymentSessionId: result.paymentSessionId,
     });
   },
 

@@ -77,7 +77,7 @@ export class PaymentService {
       }, 'Creating Cashfree order');
 
       // Create order with Cashfree
-      // Include return_url - required when using Cashfree JS SDK
+      // return_url must be CLEAN - no query params, Cashfree injects order_id
       const result = await cashfreeService.createOrderAndGetLink({
         orderId,
         amount: plan.priceINR,
@@ -88,7 +88,7 @@ export class PaymentService {
           customerEmail,
           customerPhone: user.phone,
         },
-        returnUrl: `${serverUrl}/payment/success?orderId=${orderId}`,
+        returnUrl: `${serverUrl}/payment/success`,  // CLEAN - no query params!
         notifyUrl: `${serverUrl}/api/payments/webhook`,
       });
 
@@ -108,18 +108,13 @@ export class PaymentService {
       // Log the payment link for debugging
       logger.info({ orderId, paymentLink: result.payment_link }, 'Payment link generated');
 
+      // Return ONLY orderId and paymentSessionId for SDK checkout
       return {
         orderId,
-        // Return DIRECT Cashfree checkout URL - app should open this immediately
-        paymentLink: result.direct_checkout_url,
-        // Also provide our redirect URL as fallback
-        redirectUrl: result.payment_link,
-        linkId: result.link_id,
+        paymentSessionId: result.payment_session_id,
         amount: plan.priceINR,
         coins: plan.coins,
         planName: plan.name,
-        // Include session ID for mobile apps that want to use native SDKs
-        paymentSessionId: result.payment_session_id,
       };
     } catch (error) {
       logger.error({ error, userId, planId }, '❌ Failed to create payment order');
