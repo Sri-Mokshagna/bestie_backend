@@ -262,7 +262,6 @@ function renderCashfreeSDKPage(options: {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Payment - Bestie</title>
-  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -272,6 +271,7 @@ function renderCashfreeSDKPage(options: {
       align-items: center;
       justify-content: center;
       margin: 0;
+      padding: 20px;
     }
     .container {
       background: white;
@@ -279,26 +279,58 @@ function renderCashfreeSDKPage(options: {
       padding: 40px;
       text-align: center;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 400px;
+      width: 100%;
     }
     .amount { font-size: 32px; color: #667eea; font-weight: bold; margin: 20px 0; }
-    .status { color: #666; }
+    .status { color: #666; margin-bottom: 10px; }
+    .error { color: #c62828; font-size: 14px; margin-top: 20px; }
+    .loading { color: #1976d2; }
   </style>
 </head>
 <body>
   <div class="container">
     <h2>Bestie Payment</h2>
     <div class="amount">\u20B9${amount}</div>
-    <p class="status">Redirecting to secure payment...</p>
+    <p class="status loading" id="status">Loading payment gateway...</p>
+    <p class="error" id="error" style="display:none;"></p>
   </div>
 
   <script>
-    // Initialize and open checkout immediately - NO retries, NO fallbacks
-    const cashfree = Cashfree({ mode: "${environment}" });
-    
-    cashfree.checkout({
-      paymentSessionId: "${paymentSessionId}",
-      redirectTarget: "_self"
-    });
+    // Show status updates
+    function updateStatus(msg, isError) {
+      document.getElementById('status').textContent = msg;
+      if (isError) {
+        document.getElementById('status').className = 'status error';
+        document.getElementById('error').style.display = 'block';
+        document.getElementById('error').textContent = 'Try refreshing or contact support.';
+      }
+    }
+    updateStatus('Loading Cashfree SDK...', false);
+  </script>
+  
+  <!-- Load Cashfree SDK -->
+  <script src="https://sdk.cashfree.com/js/v3/cashfree.js" 
+          onerror="updateStatus('Failed to load payment SDK. Check your internet connection.', true)">
+  </script>
+  
+  <script>
+    // Check if SDK loaded
+    if (typeof Cashfree === 'undefined') {
+      updateStatus('Payment SDK not available', true);
+    } else {
+      updateStatus('Opening secure payment...', false);
+      try {
+        const cashfree = Cashfree({ mode: "${environment}" });
+        cashfree.checkout({
+          paymentSessionId: "${paymentSessionId}",
+          redirectTarget: "_self"
+        });
+      } catch (e) {
+        updateStatus('Error: ' + e.message, true);
+        console.error('Cashfree error:', e);
+      }
+    }
   </script>
 </body>
 </html>
