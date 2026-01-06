@@ -81,6 +81,7 @@ app.use(
           "'self'",
           "https://api.cashfree.com",
           "https://sandbox.cashfree.com",
+          "https://sdk.cashfree.com",  // SDK network calls
           "https://payments.cashfree.com",
           "https://payments-test.cashfree.com",
           "wss:",
@@ -88,8 +89,15 @@ app.use(
         ],
         frameSrc: [
           "'self'",
+          "https://sdk.cashfree.com",  // SDK uses iframes
           "https://payments.cashfree.com",
           "https://payments-test.cashfree.com",
+        ],
+        // Allow form submissions to Cashfree API (CRITICAL for checkout)
+        formAction: [
+          "'self'",
+          "https://api.cashfree.com",
+          "https://sandbox.cashfree.com",
         ],
         fontSrc: ["'self'", "https:", "data:"],
       },
