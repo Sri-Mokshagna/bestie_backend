@@ -88,7 +88,7 @@ export class PaymentService {
           customerEmail,
           customerPhone: user.phone,
         },
-        returnUrl: `${serverUrl}/payment/success`,  // CLEAN - no query params!
+        returnUrl: `${serverUrl}/pay/success`,  // CLEAN - no query params! Changed to /pay to avoid Android intent
         notifyUrl: `${serverUrl}/api/payments/webhook`,
       });
 

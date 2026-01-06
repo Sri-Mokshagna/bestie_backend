@@ -95,7 +95,7 @@ export const walletController = {
 
     // Generate payment initiate URL for SDK checkout
     const serverUrl = process.env.SERVER_URL || 'https://bestie-backend-zmj2.onrender.com';
-    const paymentInitiateUrl = `${serverUrl}/payment/initiate?orderId=${result.orderId}`;
+    const paymentInitiateUrl = `${serverUrl}/pay/initiate?orderId=${result.orderId}`;
 
     logger.info({
       orderId: result.orderId,

@@ -163,7 +163,7 @@ app.use('/api/admin/commission', commissionRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/rewards', rewardsRoutes);
 app.use('/api/users', userRoutes);
-app.use('/payment', paymentRedirectRoutes);
+app.use('/pay', paymentRedirectRoutes);  // Changed from /payment to avoid Android intent interception
 app.use('/api', healthRoutes);
 
 // Initialize Socket.IO
