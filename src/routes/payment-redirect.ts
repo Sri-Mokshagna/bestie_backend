@@ -129,8 +129,9 @@ async function recreatePaymentSession(payment: any): Promise<string | null> {
 }
 
 /**
- * Payment Initiation - Cashfree JS SDK (Drop Checkout)
- * Renders a page that loads Cashfree SDK and triggers checkout
+ * Payment Initiation - Cashfree JS SDK
+ * Renders a page that uses Cashfree SDK to open checkout
+ * Per Cashfree support: Must use SDK, not direct URL append
  */
 router.get('/initiate', async (req: Request, res: Response) => {
   try {
@@ -170,7 +171,6 @@ router.get('/initiate', async (req: Request, res: Response) => {
     if (!paymentSessionId) {
       logger.warn({ orderId, gatewayResponse: payment.gatewayResponse }, 'Payment session ID not found - attempting to recover');
       
-      // Try to get fresh session from Cashfree
       try {
         const orderStatus = await cashfreeService.getPaymentStatus(orderId);
         if (orderStatus?.payment_session_id) {
@@ -179,7 +179,6 @@ router.get('/initiate', async (req: Request, res: Response) => {
           paymentSessionId = orderStatus.payment_session_id;
           logger.info({ orderId }, 'Recovered payment session from Cashfree');
         } else if (orderStatus?.order_status === 'EXPIRED' || orderStatus?.order_status === 'TERMINATED') {
-          // Order expired, need to create a new one
           logger.info({ orderId, status: orderStatus.order_status }, 'Order expired - creating new order');
           const newSessionId = await recreatePaymentSession(payment);
           if (newSessionId) {
@@ -187,9 +186,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
           }
         }
       } catch (err: any) {
-        logger.error({ err: err.message, orderId }, 'Failed to refresh payment session from Cashfree');
-        
-        // If Cashfree lookup failed, try to create a new order
+        logger.error({ err: err.message, orderId }, 'Failed to refresh payment session');
         try {
           const newSessionId = await recreatePaymentSession(payment);
           if (newSessionId) {
@@ -201,7 +198,6 @@ router.get('/initiate', async (req: Request, res: Response) => {
       }
     }
 
-    // Final check - if still no session, show error
     if (!paymentSessionId) {
       logger.error({ orderId }, 'Unable to obtain valid payment session');
       return res.status(500).send(renderErrorPage(
@@ -210,42 +206,27 @@ router.get('/initiate', async (req: Request, res: Response) => {
       ));
     }
 
-    // Determine environment - prefer stored environment from order creation
+    // Determine environment
     let environment: 'sandbox' | 'production' = 'sandbox';
     
     if (payment.gatewayResponse?._cashfree_environment) {
       environment = payment.gatewayResponse._cashfree_environment;
-      logger.info({ orderId, storedEnvironment: environment }, 'Using stored environment from order');
     } else {
       const appId = process.env.CASHFREE_APP_ID || '';
       const secretKey = process.env.CASHFREE_SECRET_KEY || '';
       const hasCredentials = appId.length > 0 && secretKey.length > 0;
       const hasTestMarkers = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
-      
-      if (!hasCredentials || hasTestMarkers) {
-        environment = 'sandbox';
-      } else {
-        environment = 'production';
-      }
-      
-      logger.info({ 
-        orderId, 
-        detectedEnvironment: environment, 
-        hasCredentials,
-        hasTestMarkers,
-        appIdPrefix: appId.substring(0, 15) || '(empty)' 
-      }, 'Detected environment from credentials (fallback)');
+      environment = (!hasCredentials || hasTestMarkers) ? 'sandbox' : 'production';
     }
     
     logger.info({
       orderId,
-      paymentSessionId: paymentSessionId.substring(0, 30) + '...',
-      fullSessionIdLength: paymentSessionId.length,
+      sessionIdLength: paymentSessionId.length,
       environment,
       amount: payment.amount,
     }, 'Rendering Cashfree SDK checkout page');
 
-    // Render page with Cashfree JS SDK
+    // Use Cashfree JS SDK to open checkout (per Cashfree support)
     res.send(renderCashfreeSDKPage({
       orderId,
       paymentSessionId,

@@ -77,7 +77,7 @@ export class PaymentService {
       }, 'Creating Cashfree order');
 
       // Create order with Cashfree
-      // Using JS SDK approach - return_url is required for SDK redirect
+      // Include return_url - required when using Cashfree JS SDK
       const result = await cashfreeService.createOrderAndGetLink({
         orderId,
         amount: plan.priceINR,
