@@ -98,6 +98,8 @@ app.use(
           "'self'",
           "https://api.cashfree.com",
           "https://sandbox.cashfree.com",
+          "https://payments.cashfree.com",
+          "https://payments-test.cashfree.com",
         ],
         fontSrc: ["'self'", "https:", "data:"],
       },

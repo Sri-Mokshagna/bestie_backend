@@ -227,8 +227,12 @@ router.get('/initiate', async (req: Request, res: Response) => {
     }, 'Rendering Cashfree SDK checkout page');
 
     // Use Cashfree JS SDK to open checkout (per Cashfree support)
-    // Set explicit Content-Type (REQUIRED for mobile Chrome)
+    // MOBILE FIX: Set explicit headers and remove restrictive security headers
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.removeHeader('X-Frame-Options');  // Allow framing for SDK
+    res.removeHeader('X-Content-Type-Options');  // Prevent MIME blocking
+    res.removeHeader('Cross-Origin-Embedder-Policy');  // Allow cross-origin
+    res.removeHeader('Cross-Origin-Opener-Policy');  // Allow popups
     res.send(renderCashfreeSDKPage({
       orderId,
       paymentSessionId,
@@ -247,7 +251,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
 
 /**
  * Render Cashfree JS SDK checkout page
- * Mobile-optimized: delayed execution + fallback button
+ * Mobile-optimized: delayed execution + fallback button + direct link
  */
 function renderCashfreeSDKPage(options: {
   orderId: string;
@@ -257,14 +261,22 @@ function renderCashfreeSDKPage(options: {
 }): string {
   const { paymentSessionId, environment, amount } = options;
   
+  // Direct checkout URL as ultimate fallback
+  const cashfreeBaseUrl = environment === 'production' 
+    ? 'https://payments.cashfree.com/order' 
+    : 'https://payments-test.cashfree.com/order';
+  const directCheckoutUrl = `${cashfreeBaseUrl}/#${paymentSessionId}`;
+  
   return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <title>Payment - Bestie</title>
   <style>
+    * { box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -278,94 +290,135 @@ function renderCashfreeSDKPage(options: {
     .container {
       background: white;
       border-radius: 20px;
-      padding: 40px;
+      padding: 30px;
       text-align: center;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      max-width: 400px;
+      max-width: 380px;
       width: 100%;
     }
-    h2 { color: #333; margin-bottom: 10px; }
-    .amount { font-size: 32px; color: #667eea; font-weight: bold; margin: 20px 0; }
-    .status { color: #666; margin-bottom: 20px; }
+    h2 { color: #333; margin: 0 0 10px 0; font-size: 22px; }
+    .amount { font-size: 28px; color: #667eea; font-weight: bold; margin: 15px 0; }
+    .status { color: #666; margin-bottom: 20px; font-size: 14px; }
     .pay-btn {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       border: none;
-      padding: 15px 40px;
+      padding: 16px 32px;
       border-radius: 30px;
-      font-size: 18px;
+      font-size: 16px;
+      font-weight: 600;
       cursor: pointer;
       width: 100%;
-      max-width: 280px;
-      margin-top: 10px;
+      max-width: 260px;
+      margin: 10px auto;
+      display: block;
+      text-decoration: none;
+      -webkit-tap-highlight-color: transparent;
     }
-    .pay-btn:hover { opacity: 0.9; }
+    .pay-btn:active { transform: scale(0.98); }
     .pay-btn:disabled { background: #ccc; cursor: not-allowed; }
-    .error { color: #c62828; font-size: 14px; margin-top: 15px; display: none; }
+    .fallback-link {
+      display: block;
+      margin-top: 15px;
+      color: #667eea;
+      font-size: 13px;
+      text-decoration: underline;
+    }
+    .error { color: #c62828; font-size: 13px; margin-top: 15px; display: none; }
+    .loader { display: none; margin: 15px auto; width: 30px; height: 30px; border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div class="container">
     <h2>Bestie Payment</h2>
     <div class="amount">\u20B9${amount}</div>
-    <p class="status" id="status">Ready to pay</p>
-    <button class="pay-btn" id="payBtn">Continue to Payment</button>
+    <p class="status" id="status">Tap button to pay securely</p>
+    <div class="loader" id="loader"></div>
+    <button class="pay-btn" id="payBtn" type="button">Pay Now</button>
+    <a href="${directCheckoutUrl}" class="fallback-link" id="fallbackLink">Click here if button doesn't work</a>
     <p class="error" id="error"></p>
   </div>
 
-  <!-- Load Cashfree SDK -->
+  <noscript>
+    <style>.pay-btn, .fallback-link { display: none !important; }</style>
+    <p style="text-align:center; margin-top:20px;">
+      <a href="${directCheckoutUrl}" style="background:#667eea;color:white;padding:15px 30px;border-radius:25px;text-decoration:none;display:inline-block;">Pay Now</a>
+    </p>
+  </noscript>
+
   <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
   
   <script>
-    var paymentSessionId = "${paymentSessionId}";
-    var environment = "${environment}";
-    var paymentStarted = false;
-    
-    function showError(msg) {
-      document.getElementById('status').textContent = 'Error';
-      document.getElementById('error').textContent = msg;
-      document.getElementById('error').style.display = 'block';
-      document.getElementById('payBtn').disabled = false;
-      document.getElementById('payBtn').textContent = 'Try Again';
-    }
-    
-    function startPayment() {
-      if (paymentStarted) return;
-      paymentStarted = true;
+    (function() {
+      var SESSION_ID = "${paymentSessionId}";
+      var ENV = "${environment}";
+      var DIRECT_URL = "${directCheckoutUrl}";
+      var paymentStarted = false;
       
-      document.getElementById('payBtn').disabled = true;
-      document.getElementById('payBtn').textContent = 'Opening...';
-      document.getElementById('status').textContent = 'Connecting to payment gateway...';
+      var statusEl = document.getElementById('status');
+      var errorEl = document.getElementById('error');
+      var btnEl = document.getElementById('payBtn');
+      var loaderEl = document.getElementById('loader');
+      var fallbackEl = document.getElementById('fallbackLink');
       
-      try {
-        if (typeof Cashfree === 'undefined') {
-          showError('Payment SDK not loaded. Please refresh the page.');
-          paymentStarted = false;
-          return;
-        }
-        
-        var cashfree = Cashfree({ mode: environment });
-        cashfree.checkout({
-          paymentSessionId: paymentSessionId,
-          redirectTarget: "_self"
-        });
-      } catch (e) {
-        showError('Payment error: ' + e.message);
+      function showError(msg) {
+        if (statusEl) statusEl.textContent = 'Error';
+        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Try Again'; }
+        if (loaderEl) loaderEl.style.display = 'none';
         paymentStarted = false;
       }
-    }
-    
-    // Button click handler (user gesture - required for mobile)
-    document.getElementById('payBtn').onclick = startPayment;
-    
-    // Auto-start after delay (for desktop compatibility)
-    window.addEventListener('load', function() {
-      setTimeout(function() {
-        if (!paymentStarted && typeof Cashfree !== 'undefined') {
-          startPayment();
+      
+      function startPayment() {
+        if (paymentStarted) return;
+        paymentStarted = true;
+        
+        if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Opening...'; }
+        if (statusEl) statusEl.textContent = 'Connecting to payment gateway...';
+        if (loaderEl) loaderEl.style.display = 'block';
+        if (fallbackEl) fallbackEl.style.display = 'none';
+        
+        try {
+          if (typeof Cashfree === 'undefined') {
+            // SDK not loaded - redirect directly
+            console.log('SDK not loaded, using direct URL');
+            window.location.href = DIRECT_URL;
+            return;
+          }
+          
+          var cashfree = Cashfree({ mode: ENV });
+          cashfree.checkout({
+            paymentSessionId: SESSION_ID,
+            redirectTarget: "_self"
+          });
+          
+          // Fallback: if checkout doesn't redirect in 5s, use direct URL
+          setTimeout(function() {
+            if (paymentStarted) {
+              console.log('Checkout timeout, using direct URL');
+              window.location.href = DIRECT_URL;
+            }
+          }, 5000);
+          
+        } catch (e) {
+          console.error('Payment error:', e);
+          // On any error, redirect to direct URL
+          window.location.href = DIRECT_URL;
         }
-      }, 500); // 500ms delay for mobile compatibility
-    });
+      }
+      
+      // Button click handler
+      if (btnEl) {
+        btnEl.onclick = function(e) {
+          e.preventDefault();
+          startPayment();
+        };
+      }
+      
+      // Do NOT auto-start on mobile - wait for user tap
+      // This prevents mobile Chrome from blocking the page
+    })();
   </script>
 </body>
 </html>
