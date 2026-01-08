@@ -1,14 +1,14 @@
 import { Request, Response } from 'express';
-import { Promotion } from '../../models/Promotion';
+import { Promotion, PromotionStatus } from '../../models/Promotion';
 
 // Get all promotions
 export const getAllPromotions = async (req: Request, res: Response) => {
   try {
-    const { isActive, page = 1, limit = 20 } = req.query;
+    const { status, page = 1, limit = 20 } = req.query;
 
     const query: any = {};
-    if (typeof isActive !== 'undefined') {
-      query.isActive = isActive === 'true';
+    if (status) {
+      query.status = status;
     }
 
     const promotions = await Promotion.find(query)
@@ -54,32 +54,39 @@ export const getPromotionDetails = async (req: Request, res: Response) => {
 export const createPromotion = async (req: Request, res: Response) => {
   try {
     const {
-      title,
+      name,
       description,
-      discountType,
-      discountValue,
-      conditions,
-      schedule,
-      maxUsagePerUser,
-      maxTotalUsage,
+      type,
+      value,
+      code,
+      minPurchase,
+      maxUsesTotal,
+      maxUsesPerUser,
+      startDate,
+      endDate,
     } = req.body;
 
-    if (!title || !description || !discountType || !discountValue) {
+    const adminId = (req as any).user?.id;
+
+    if (!name || !type || value === undefined || !startDate || !endDate) {
       return res.status(400).json({ 
-        error: 'Title, description, discount type, and discount value are required' 
+        error: 'Name, type, value, startDate, and endDate are required' 
       });
     }
 
     const promotion = await Promotion.create({
-      title,
+      name,
       description,
-      discountType,
-      discountValue,
-      conditions: conditions || {},
-      schedule,
-      maxUsagePerUser: maxUsagePerUser || 1,
-      maxTotalUsage,
-      isActive: true,
+      type,
+      value,
+      code: code?.toUpperCase(),
+      minPurchase,
+      maxUsesTotal,
+      maxUsesPerUser: maxUsesPerUser || 1,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      status: PromotionStatus.DRAFT,
+      createdBy: adminId,
     });
 
     res.status(201).json({ promotion });
@@ -133,17 +140,25 @@ export const deletePromotion = async (req: Request, res: Response) => {
 export const togglePromotionStatus = async (req: Request, res: Response) => {
   try {
     const { promotionId } = req.params;
+    const { status } = req.body;
 
     const promotion = await Promotion.findById(promotionId);
     if (!promotion) {
       return res.status(404).json({ error: 'Promotion not found' });
     }
 
-    promotion.isActive = !promotion.isActive;
+    // Toggle between active and paused if no status provided
+    if (status) {
+      promotion.status = status;
+    } else {
+      promotion.status = promotion.status === PromotionStatus.ACTIVE 
+        ? PromotionStatus.PAUSED 
+        : PromotionStatus.ACTIVE;
+    }
     await promotion.save();
 
     res.json({ 
-      message: `Promotion ${promotion.isActive ? 'activated' : 'deactivated'}`,
+      message: `Promotion ${promotion.status}`,
       promotion 
     });
   } catch (error) {

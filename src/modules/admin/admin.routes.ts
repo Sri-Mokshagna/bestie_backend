@@ -4,6 +4,7 @@ import { UserRole } from '../../models/User';
 import * as adminController from './admin.controller';
 import * as adminVoiceController from './admin-voice.controller';
 import * as reportsController from './reports.controller';
+import * as coinConfigController from './coinConfig.controller';
 import * as payoutController from '../responder/payout.controller';
 
 const router = Router();
@@ -29,6 +30,7 @@ router.get('/voice-recordings', adminVoiceController.getRespondersWithVoiceRecor
 
 // Reports
 router.get('/reports', reportsController.getReportedUsers);
+router.put('/reports/:reportId', reportsController.updateReportStatus);
 
 // Analytics
 router.get('/analytics/dashboard', adminController.getDashboardAnalytics);
@@ -41,5 +43,15 @@ router.put('/commission', adminController.updateCommissionSettings);
 // Payout management
 router.get('/payouts', payoutController.getAllPayouts);
 router.put('/payouts/:payoutId/process', payoutController.processPayout);
+
+// Coin Config
+router.get('/coin-config', coinConfigController.getCoinConfig);
+router.put('/coin-config', coinConfigController.updateCoinConfig);
+
+// Coin Plans CRUD
+router.get('/coin-plans', coinConfigController.getCoinPlans);
+router.post('/coin-plans', coinConfigController.createCoinPlan);
+router.put('/coin-plans/:planId', coinConfigController.updateCoinPlan);
+router.delete('/coin-plans/:planId', coinConfigController.deleteCoinPlan);
 
 export default router;

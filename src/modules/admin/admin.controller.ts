@@ -391,16 +391,29 @@ export const getRevenueAnalytics = async (req: Request, res: Response) => {
   }
 };
 
-// Get commission settings
+// Get commission settings - Uses CommissionConfig model from database
 export const getCommissionSettings = async (req: Request, res: Response) => {
   try {
-    // For now, return default settings
-    // TODO: Store this in database
+    const { CommissionConfig } = await import('../../models/CommissionConfig');
+    
+    let config = await CommissionConfig.findOne({ isActive: true });
+    
+    // Create default config if none exists
+    if (!config) {
+      config = await CommissionConfig.create({
+        responderCommissionPercentage: 70,
+        adminCommissionPercentage: 30,
+        coinToINRRate: 1,
+        minimumRedemptionCoins: 100,
+        isActive: true,
+      });
+    }
+    
     res.json({
-      responderCommission: 70, // 70% to responder
-      platformCommission: 30, // 30% to platform
-      minPayoutCoins: 100,
-      coinToINRRate: 1, // 1 coin = 1 INR
+      responderCommission: config.responderCommissionPercentage,
+      platformCommission: config.adminCommissionPercentage,
+      minPayoutCoins: config.minimumRedemptionCoins,
+      coinToINRRate: config.coinToINRRate,
     });
   } catch (error) {
     logger.error(error, 'Get commission settings error');
@@ -408,25 +421,38 @@ export const getCommissionSettings = async (req: Request, res: Response) => {
   }
 };
 
-// Update commission settings
+// Update commission settings - Persists to CommissionConfig model
 export const updateCommissionSettings = async (req: Request, res: Response) => {
   try {
     const { responderCommission, platformCommission, minPayoutCoins, coinToINRRate } = req.body;
+    const { CommissionConfig } = await import('../../models/CommissionConfig');
 
     // Validate
     if (responderCommission + platformCommission !== 100) {
       return res.status(400).json({ error: 'Commission percentages must add up to 100' });
     }
 
-    // TODO: Store in database
-    // For now, just return success
+    // Deactivate current config
+    await CommissionConfig.updateMany({ isActive: true }, { isActive: false });
+
+    // Create new config
+    const newConfig = await CommissionConfig.create({
+      responderCommissionPercentage: responderCommission,
+      adminCommissionPercentage: platformCommission,
+      minimumRedemptionCoins: minPayoutCoins,
+      coinToINRRate: coinToINRRate,
+      isActive: true,
+    });
+
+    logger.info({ adminId: (req as any).user?.id, newConfig }, 'Commission settings updated');
+
     res.json({
       message: 'Commission settings updated',
       settings: {
-        responderCommission,
-        platformCommission,
-        minPayoutCoins,
-        coinToINRRate,
+        responderCommission: newConfig.responderCommissionPercentage,
+        platformCommission: newConfig.adminCommissionPercentage,
+        minPayoutCoins: newConfig.minimumRedemptionCoins,
+        coinToINRRate: newConfig.coinToINRRate,
       },
     });
   } catch (error) {

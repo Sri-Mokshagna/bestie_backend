@@ -1,6 +1,8 @@
 import { User, UserRole, UserStatus } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
-import { Responder } from '../../models/Responder';
+import { Responder, KycStatus } from '../../models/Responder';
+import { notificationService } from '../../lib/notification';
+import { logger } from '../../lib/logger';
 
 export const responderService = {
   async getActiveResponders(onlineOnly?: boolean) {
@@ -261,5 +263,159 @@ export const responderService = {
       chatEnabled: false,
       message: 'All availability options disabled',
     };
+  },
+
+  // ===== Application & Admin Methods =====
+
+  async applyAsResponder(
+    userId: string,
+    data: {
+      name: string;
+      gender: string;
+      bio: string;
+      idProofUrl?: string;
+      voiceProofUrl: string;
+    }
+  ) {
+    // Check if already applied
+    const existing = await Responder.findOne({ userId });
+    if (existing) {
+      throw new AppError(400, 'You have already applied as a responder');
+    }
+
+    // Update user profile
+    await User.findByIdAndUpdate(userId, {
+      'profile.name': data.name,
+      'profile.gender': data.gender,
+    });
+
+    // Create responder profile
+    const responder = await Responder.create({
+      userId,
+      isOnline: false,
+      kycStatus: KycStatus.PENDING,
+      kycDocs: {
+        idProof: data.idProofUrl || undefined,
+        voiceProof: data.voiceProofUrl,
+      },
+      earnings: {
+        totalCoins: 0,
+        pendingCoins: 0,
+        redeemedCoins: 0,
+      },
+      rating: 0,
+      bio: data.bio,
+    });
+
+    return responder;
+  },
+
+  async getPendingApplications() {
+    const responders = await Responder.find({
+      kycStatus: KycStatus.PENDING,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Batch fetch all users in ONE query
+    const userIds = responders.map(r => r.userId);
+    const users = await User.find({ _id: { $in: userIds } }).lean();
+    const userMap = new Map(users.map(u => [u._id.toString(), u]));
+
+    const applications = responders.map((responder) => {
+      const user = userMap.get(responder.userId.toString());
+      return {
+        id: responder._id,
+        userId: responder.userId,
+        name: user?.profile?.name || 'Unknown',
+        gender: user?.profile?.gender || 'unknown',
+        bio: responder.bio,
+        aadharImageUrl: responder.kycDocs?.idProof || '',
+        voiceRecordingUrl: responder.kycDocs?.voiceProof || '',
+        appliedAt: responder.createdAt,
+        status: responder.kycStatus,
+      };
+    });
+
+    return applications;
+  },
+
+  async approveResponder(responderId: string, adminId: string) {
+    const responder = await Responder.findById(responderId);
+
+    if (!responder) {
+      throw new AppError(404, 'Responder not found');
+    }
+
+    if (responder.kycStatus !== KycStatus.PENDING) {
+      throw new AppError(400, 'Application is not pending');
+    }
+
+    const user = await User.findById(responder.userId);
+    if (!user) {
+      throw new AppError(404, 'User not found');
+    }
+
+    // Update responder status
+    responder.kycStatus = KycStatus.VERIFIED;
+    responder.audioEnabled = true;
+    responder.videoEnabled = true;
+    responder.chatEnabled = true;
+    responder.isOnline = false;
+    await responder.save();
+
+    // Update user role to responder
+    await User.findByIdAndUpdate(responder.userId, {
+      role: 'responder',
+      isOnline: false,
+      audioEnabled: true,
+      videoEnabled: true,
+      chatEnabled: true,
+    });
+
+    // Send approval notification
+    try {
+      await notificationService.sendApprovalNotification(
+        responder.userId.toString(),
+        user.profile?.name || 'User'
+      );
+    } catch (error) {
+      logger.error({ error }, 'Failed to send approval notification');
+    }
+
+    return responder;
+  },
+
+  async rejectResponder(responderId: string, adminId: string, reason?: string) {
+    const responder = await Responder.findById(responderId);
+
+    if (!responder) {
+      throw new AppError(404, 'Responder not found');
+    }
+
+    if (responder.kycStatus !== KycStatus.PENDING) {
+      throw new AppError(400, 'Application is not pending');
+    }
+
+    const user = await User.findById(responder.userId);
+    if (!user) {
+      throw new AppError(404, 'User not found');
+    }
+
+    responder.kycStatus = KycStatus.REJECTED;
+    await responder.save();
+
+    // Send rejection notification
+    try {
+      await notificationService.sendRejectionNotification(
+        responder.userId.toString(),
+        user.profile?.name || 'User',
+        reason
+      );
+    } catch (error) {
+      logger.error({ error }, 'Failed to send rejection notification');
+    }
+
+    return responder;
   },
 };

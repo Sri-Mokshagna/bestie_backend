@@ -4,6 +4,8 @@ import { User } from '../models/User';
 import { CoinPlan } from '../models/CoinPlan';
 import { logger } from '../lib/logger';
 import { cashfreeService } from '../lib/cashfree';
+import { coinService } from '../services/coinService';
+import { TransactionType } from '../models/Transaction';
 
 const router = Router();
 
@@ -428,6 +430,7 @@ function renderCashfreeSDKPage(options: {
 /**
  * Payment Success Page
  * Shown after successful payment, redirects to mobile app
+ * Also triggers coin credit if not already done
  */
 router.get('/success', async (req: Request, res: Response) => {
   const { orderId, order_id } = req.query;
@@ -435,7 +438,7 @@ router.get('/success', async (req: Request, res: Response) => {
   
   logger.info({ orderId: finalOrderId }, 'Payment success redirect');
 
-  // Verify payment status if we have an order ID
+  // Verify payment status and credit coins if needed
   let verifiedStatus = 'unknown';
   if (finalOrderId) {
     try {
@@ -444,6 +447,28 @@ router.get('/success', async (req: Request, res: Response) => {
       });
       if (payment) {
         verifiedStatus = payment.status;
+        
+        // If still pending, check with Cashfree and credit coins
+        if (payment.status === PaymentStatus.PENDING) {
+          try {
+            const cfStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+            if (cfStatus?.order_status === 'PAID') {
+              // Credit coins
+              await coinService.creditCoins(
+                payment.userId.toString(),
+                payment.coins,
+                TransactionType.PURCHASE,
+                { orderId: payment.orderId, description: `Coin purchase - Order ${payment.orderId}` }
+              );
+              payment.status = PaymentStatus.SUCCESS;
+              await payment.save();
+              verifiedStatus = PaymentStatus.SUCCESS;
+              logger.info({ userId: payment.userId, orderId: payment.orderId, coins: payment.coins }, 'Coins credited via success page');
+            }
+          } catch (creditErr) {
+            logger.warn({ creditErr, orderId: finalOrderId }, 'Could not credit coins on success page');
+          }
+        }
       }
     } catch (err) {
       logger.warn({ err, orderId: finalOrderId }, 'Could not verify payment status');
@@ -495,8 +520,25 @@ router.get('/status/:orderId', async (req: Request, res: Response) => {
       try {
         const cfStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
         if (cfStatus?.order_status === 'PAID') {
-          payment.status = PaymentStatus.SUCCESS;
-          await payment.save();
+          // IMPORTANT: Actually credit the coins, not just update status!
+          try {
+            await coinService.creditCoins(
+              payment.userId.toString(),
+              payment.coins,
+              TransactionType.PURCHASE,
+              { orderId: payment.orderId, description: `Coin purchase - Order ${payment.orderId}` }
+            );
+            payment.status = PaymentStatus.SUCCESS;
+            await payment.save();
+            logger.info({
+              userId: payment.userId,
+              orderId: payment.orderId,
+              coins: payment.coins
+            }, 'Coins credited via status check');
+          } catch (creditError) {
+            logger.error({ creditError, orderId }, 'Failed to credit coins during status check');
+            // Don't update status if coin credit failed
+          }
         } else if (cfStatus?.order_status === 'EXPIRED') {
           payment.status = PaymentStatus.FAILED;
           payment.failureReason = 'Payment expired';

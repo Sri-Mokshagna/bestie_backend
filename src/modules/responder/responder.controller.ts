@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { responderService } from './responder.service';
 import { AuthRequest } from '../../middleware/auth';
+import { AppError } from '../../middleware/errorHandler';
 
 export const responderController = {
   async getResponders(req: Request, res: Response) {
@@ -86,5 +87,71 @@ export const responderController = {
     const result = await responderService.disableAllAvailability(req.user.id);
 
     res.json(result);
+  },
+
+  // ===== Application & Admin Methods =====
+  
+  async applyAsResponder(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { name, gender, bio, idProofUrl, voiceProofUrl } = req.body;
+
+    if (!name || !gender || !bio || !voiceProofUrl) {
+      throw new AppError(400, 'Name, gender, bio, and voice recording are required');
+    }
+
+    const responder = await responderService.applyAsResponder(req.user.id, {
+      name,
+      gender,
+      bio,
+      idProofUrl,
+      voiceProofUrl,
+    });
+
+    res.json({ responder });
+  },
+
+  async getPendingApplications(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const applications = await responderService.getPendingApplications();
+
+    res.json({ applications });
+  },
+
+  async approveResponder(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { responderId } = req.params;
+
+    const responder = await responderService.approveResponder(
+      responderId,
+      req.user.id
+    );
+
+    res.json({ responder, message: 'Responder approved successfully' });
+  },
+
+  async rejectResponder(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { responderId } = req.params;
+    const { reason } = req.body;
+
+    const responder = await responderService.rejectResponder(
+      responderId,
+      req.user.id,
+      reason
+    );
+
+    res.json({ responder, message: 'Responder rejected' });
   },
 };

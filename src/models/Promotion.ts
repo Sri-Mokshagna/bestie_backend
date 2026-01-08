@@ -1,68 +1,100 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export interface IPromotionConditions {
-  minBalance?: number;
-  userType?: 'all' | 'new' | 'existing';
+export enum PromotionType {
+  DISCOUNT = 'discount',        // Percentage off coin purchase
+  BONUS_COINS = 'bonus_coins',  // Extra coins with purchase
+  FREE_COINS = 'free_coins',    // Free coins (login bonus, referral)
 }
 
-export interface IPromotionSchedule {
-  startDate: Date;
-  endDate: Date;
+export enum PromotionStatus {
+  DRAFT = 'draft',
+  ACTIVE = 'active',
+  PAUSED = 'paused',
+  EXPIRED = 'expired',
 }
 
 export interface IPromotion extends Document {
-  title: string;
-  description: string;
-  conditions: IPromotionConditions;
-  discount: number;
-  planId?: Types.ObjectId;
-  schedule: IPromotionSchedule;
-  isActive: boolean;
+  name: string;
+  description?: string;
+  type: PromotionType;
+  value: number;                 // Discount % or bonus coins amount
+  code?: string;                 // Optional promo code
+  minPurchase?: number;          // Minimum purchase amount (INR)
+  maxUsesTotal?: number;         // Total uses allowed
+  maxUsesPerUser?: number;       // Uses per user
+  usedCount: number;
+  status: PromotionStatus;
+  startDate: Date;
+  endDate: Date;
+  applicablePlans?: Types.ObjectId[];  // Specific coin plans this applies to
+  createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const promotionSchema = new Schema<IPromotion>(
   {
-    title: {
+    name: {
       type: String,
       required: true,
     },
     description: {
       type: String,
+    },
+    type: {
+      type: String,
+      enum: Object.values(PromotionType),
       required: true,
     },
-    conditions: {
-      minBalance: Number,
-      userType: {
-        type: String,
-        enum: ['all', 'new', 'existing'],
-        default: 'all',
-      },
-    },
-    discount: {
+    value: {
       type: Number,
       required: true,
       min: 0,
-      max: 100,
     },
-    planId: {
+    code: {
+      type: String,
+      unique: true,
+      sparse: true,  // Allow multiple null values
+      uppercase: true,
+    },
+    minPurchase: {
+      type: Number,
+      min: 0,
+    },
+    maxUsesTotal: {
+      type: Number,
+      min: 1,
+    },
+    maxUsesPerUser: {
+      type: Number,
+      min: 1,
+      default: 1,
+    },
+    usedCount: {
+      type: Number,
+      default: 0,
+    },
+    status: {
+      type: String,
+      enum: Object.values(PromotionStatus),
+      default: PromotionStatus.DRAFT,
+    },
+    startDate: {
+      type: Date,
+      required: true,
+    },
+    endDate: {
+      type: Date,
+      required: true,
+    },
+    applicablePlans: [{
       type: Schema.Types.ObjectId,
       ref: 'CoinPlan',
-    },
-    schedule: {
-      startDate: {
-        type: Date,
-        required: true,
-      },
-      endDate: {
-        type: Date,
-        required: true,
-      },
-    },
-    isActive: {
-      type: Boolean,
-      default: true,
+    }],
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
     },
   },
   {
@@ -71,6 +103,7 @@ const promotionSchema = new Schema<IPromotion>(
 );
 
 // Indexes
-promotionSchema.index({ isActive: 1, 'schedule.startDate': 1, 'schedule.endDate': 1 });
+promotionSchema.index({ status: 1, startDate: 1, endDate: 1 });
+promotionSchema.index({ code: 1 });
 
 export const Promotion = model<IPromotion>('Promotion', promotionSchema);

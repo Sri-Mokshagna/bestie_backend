@@ -1,26 +1,30 @@
 import { Router } from 'express';
 import { responderController } from './responder.controller';
-import { authenticate } from '../../middleware/auth';
+import { authenticate, authorize } from '../../middleware/auth';
 import { asyncHandler } from '../../lib/asyncHandler';
+import { UserRole } from '../../models/User';
 
 const router = Router();
 
+// Public routes
 // Get all active responders
 router.get('/', asyncHandler(responderController.getResponders));
 
-// Get my own responder profile (authenticated) - MUST come before /status
+// Responder authenticated routes - MUST come before /:id
 router.get('/me', authenticate, asyncHandler(responderController.getMyProfile));
-
-// Update responder online status (authenticated) - MUST come before /:id
 router.put('/status', authenticate, asyncHandler(responderController.updateStatus));
-
-// Update responder availability settings (authenticated)
 router.put('/availability', authenticate, asyncHandler(responderController.updateAvailability));
-
-// Disable all availability options (authenticated)
 router.post('/availability/disable-all', authenticate, asyncHandler(responderController.disableAllAvailability));
 
-// Get responder by ID - MUST be last to avoid catching /status
+// Application route (user applying to become responder)
+router.post('/apply', authenticate, asyncHandler(responderController.applyAsResponder));
+
+// Admin routes for managing responder applications
+router.get('/admin/pending', authenticate, authorize(UserRole.ADMIN), asyncHandler(responderController.getPendingApplications));
+router.post('/admin/approve/:responderId', authenticate, authorize(UserRole.ADMIN), asyncHandler(responderController.approveResponder));
+router.post('/admin/reject/:responderId', authenticate, authorize(UserRole.ADMIN), asyncHandler(responderController.rejectResponder));
+
+// Get responder by ID - MUST be last to avoid catching /status, /me, /admin/*
 router.get('/:id', asyncHandler(responderController.getResponderById));
 
 export default router;
