@@ -169,6 +169,35 @@ router.get('/initiate', async (req: Request, res: Response) => {
     // Get the payment session ID from gateway response
     let paymentSessionId = payment.gatewayResponse?.payment_session_id;
 
+    // Check if payment session is still valid by getting fresh status from Cashfree
+    // This helps identify if the session has expired even if stored in DB
+    if (paymentSessionId) {
+      try {
+        const orderStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+        logger.info({ orderId: payment.orderId, cashfreeOrderId: payment.cashfreeOrderId, orderStatus: orderStatus?.order_status }, 'Checking current order status from Cashfree');
+        
+        // If Cashfree says the order is expired or terminated, even though we have a session ID,
+        // we need to recreate the order
+        if (orderStatus?.order_status === 'EXPIRED' || orderStatus?.order_status === 'TERMINATED') {
+          logger.info({ orderId: payment.orderId, status: orderStatus.order_status }, 'Order has expired on Cashfree side - recreating payment session');
+          const newSessionId = await recreatePaymentSession(payment);
+          if (newSessionId) {
+            paymentSessionId = newSessionId;
+          }
+        } else if (!orderStatus?.payment_session_id) {
+          // If Cashfree doesn't have a session ID anymore, recreate
+          logger.info({ orderId: payment.orderId }, 'No session ID from Cashfree - recreating payment session');
+          const newSessionId = await recreatePaymentSession(payment);
+          if (newSessionId) {
+            paymentSessionId = newSessionId;
+          }
+        }
+      } catch (statusErr: any) {
+        logger.warn({ err: statusErr.message, orderId: payment.orderId }, 'Could not get fresh status from Cashfree, using stored session ID');
+        // Continue with stored session ID if status check fails
+      }
+    }
+
     // If no session ID, try to refresh or recreate
     if (!paymentSessionId) {
       logger.warn({ orderId, gatewayResponse: payment.gatewayResponse }, 'Payment session ID not found - attempting to recover');
