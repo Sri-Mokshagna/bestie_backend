@@ -275,57 +275,90 @@ export class PaymentService {
         throw new AppError(404, 'Payment not found');
       }
 
-      if (payment.status === PaymentStatus.PENDING) {
-        try {
-          const cashfreeStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
-          
-          logger.info({
-            orderId: payment.orderId,
-            cashfreeOrderId: payment.cashfreeOrderId,
-            cfStatus: cashfreeStatus?.order_status
-          }, 'Cashfree status check result in getPaymentStatus');
-          
-          if (cashfreeStatus.order_status === 'PAID') {
+      try {
+        // Always check Cashfree for the most up-to-date status to handle webhook failures
+        const cashfreeStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+        
+        logger.info({
+          orderId: payment.orderId,
+          cashfreeOrderId: payment.cashfreeOrderId,
+          currentStatus: payment.status,
+          cfStatus: cashfreeStatus?.order_status,
+          cfPaymentStatus: Array.isArray(cashfreeStatus?.payment_sessions) && cashfreeStatus.payment_sessions.length > 0 
+            ? cashfreeStatus.payment_sessions[0]?.payment_status 
+            : cashfreeStatus?.payment_session?.[0]?.payment_status
+        }, 'Checking Cashfree status for payment verification');
+        
+        // Handle various Cashfree statuses
+        if (cashfreeStatus.order_status === 'PAID') {
+          // If Cashfree shows PAID but our system doesn't have it as SUCCESS, process it
+          if (payment.status !== PaymentStatus.SUCCESS) {
+            logger.warn({
+              orderId: payment.orderId,
+              currentStatus: payment.status,
+              cfStatus: cashfreeStatus.order_status
+            }, 'Payment status mismatch detected - processing successful payment');
+            
             await this.handleSuccessfulPayment(payment);
             await payment.save();
-          } else if (cashfreeStatus.order_status === 'EXPIRED') {
+          }
+        } else if (cashfreeStatus.order_status === 'EXPIRED') {
+          if (payment.status !== PaymentStatus.FAILED) {
             payment.status = PaymentStatus.FAILED;
             payment.failureReason = 'Payment expired';
             await payment.save();
           }
-        } catch (error) {
-          logger.warn({ error, orderId }, 'Failed to check payment status with Cashfree');
-        }
-      } else {
-        // Even if status is not PENDING, check Cashfree status to handle cases where
-        // webhook didn't arrive but payment was successful
-        try {
-          const cashfreeStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+        } else if (cashfreeStatus.order_status === 'CANCELLED') {
+          if (payment.status !== PaymentStatus.CANCELLED) {
+            payment.status = PaymentStatus.CANCELLED;
+            await payment.save();
+          }
+        } else if (cashfreeStatus.order_status === 'ACTIVE' && payment.status === PaymentStatus.PENDING) {
+          // Check if payment has been active for too long and might have failed silently
+          const paymentAge = Date.now() - payment.createdAt.getTime();
+          const maxPaymentTime = 30 * 60 * 1000; // 30 minutes
           
-          logger.info({
-            orderId: payment.orderId,
-            cashfreeOrderId: payment.cashfreeOrderId,
-            currentStatus: payment.status,
-            cfStatus: cashfreeStatus?.order_status
-          }, 'Cashfree status check for non-pending payment in getPaymentStatus');
-          
-          // If Cashfree shows PAID but our system doesn't have it as SUCCESS, process it
-          if (cashfreeStatus.order_status === 'PAID' && payment.status !== PaymentStatus.SUCCESS) {
-            logger.warn({
+          if (paymentAge > maxPaymentTime) {
+            logger.info({
               orderId: payment.orderId,
-              currentStatus: payment.status,
-              cfStatus: cashfreeStatus?.order_status
-            }, 'Payment status mismatch in getPaymentStatus - Cashfree shows PAID but our system shows different status');
+              paymentAgeMs: paymentAge
+            }, 'Payment has been pending for too long, checking for possible failure');
             
-            try {
-              await this.handleSuccessfulPayment(payment);
-              await payment.save();
-            } catch (error) {
-              logger.error({ error, orderId: payment.orderId }, 'Failed to handle successful payment for mismatched status');
+            // Check if any payment was made but not captured properly
+            const paymentSessions = cashfreeStatus.payment_sessions || cashfreeStatus.payment_session || [];
+            if (Array.isArray(paymentSessions) && paymentSessions.length > 0) {
+              const successfulPayment = paymentSessions.some(
+                (session: any) => session.payment_status === 'SUCCESS'
+              );
+              
+              if (successfulPayment) {
+                logger.info({
+                  orderId: payment.orderId
+                }, 'Found successful payment in session data, processing');
+                await this.handleSuccessfulPayment(payment);
+                await payment.save();
+              }
             }
           }
-        } catch (error) {
-          logger.warn({ error, orderId }, 'Failed to check Cashfree status for non-pending payment');
+        }
+      } catch (error) {
+        logger.error({ error, orderId, cashfreeOrderId: payment.cashfreeOrderId }, 'Failed to check payment status with Cashfree');
+        
+        // As a fallback, if we can't reach Cashfree but payment is very old, mark as failed
+        if (payment.status === PaymentStatus.PENDING) {
+          const paymentAge = Date.now() - payment.createdAt.getTime();
+          const maxPaymentTime = 60 * 60 * 1000; // 1 hour
+          
+          if (paymentAge > maxPaymentTime) {
+            logger.warn({
+              orderId: payment.orderId,
+              paymentAgeMs: paymentAge
+            }, 'Unable to verify payment with Cashfree and payment is very old, marking as failed');
+            
+            payment.status = PaymentStatus.FAILED;
+            payment.failureReason = 'Unable to verify payment status with gateway';
+            await payment.save();
+          }
         }
       }
 
