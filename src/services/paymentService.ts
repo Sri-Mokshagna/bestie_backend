@@ -278,7 +278,13 @@ export class PaymentService {
       if (payment.status === PaymentStatus.PENDING) {
         try {
           const cashfreeStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
-
+          
+          logger.info({
+            orderId: payment.orderId,
+            cashfreeOrderId: payment.cashfreeOrderId,
+            cfStatus: cashfreeStatus?.order_status
+          }, 'Cashfree status check result in getPaymentStatus');
+          
           if (cashfreeStatus.order_status === 'PAID') {
             await this.handleSuccessfulPayment(payment);
             await payment.save();
@@ -289,6 +295,37 @@ export class PaymentService {
           }
         } catch (error) {
           logger.warn({ error, orderId }, 'Failed to check payment status with Cashfree');
+        }
+      } else {
+        // Even if status is not PENDING, check Cashfree status to handle cases where
+        // webhook didn't arrive but payment was successful
+        try {
+          const cashfreeStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+          
+          logger.info({
+            orderId: payment.orderId,
+            cashfreeOrderId: payment.cashfreeOrderId,
+            currentStatus: payment.status,
+            cfStatus: cashfreeStatus?.order_status
+          }, 'Cashfree status check for non-pending payment in getPaymentStatus');
+          
+          // If Cashfree shows PAID but our system doesn't have it as SUCCESS, process it
+          if (cashfreeStatus.order_status === 'PAID' && payment.status !== PaymentStatus.SUCCESS) {
+            logger.warn({
+              orderId: payment.orderId,
+              currentStatus: payment.status,
+              cfStatus: cashfreeStatus?.order_status
+            }, 'Payment status mismatch in getPaymentStatus - Cashfree shows PAID but our system shows different status');
+            
+            try {
+              await this.handleSuccessfulPayment(payment);
+              await payment.save();
+            } catch (error) {
+              logger.error({ error, orderId: payment.orderId }, 'Failed to handle successful payment for mismatched status');
+            }
+          }
+        } catch (error) {
+          logger.warn({ error, orderId }, 'Failed to check Cashfree status for non-pending payment');
         }
       }
 

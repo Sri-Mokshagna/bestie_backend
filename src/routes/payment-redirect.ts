@@ -481,6 +481,12 @@ router.get('/success', async (req: Request, res: Response) => {
         if (payment.status === PaymentStatus.PENDING) {
           try {
             const cfStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+            logger.info({
+              orderId: payment.orderId,
+              cashfreeOrderId: payment.cashfreeOrderId,
+              cfStatus: cfStatus?.order_status
+            }, 'Cashfree status check result on success page');
+            
             if (cfStatus?.order_status === 'PAID') {
               // Credit coins
               await coinService.creditCoins(
@@ -496,6 +502,43 @@ router.get('/success', async (req: Request, res: Response) => {
             }
           } catch (creditErr) {
             logger.warn({ creditErr, orderId: finalOrderId }, 'Could not credit coins on success page');
+          }
+        } else {
+          // Even if not pending, verify Cashfree status to handle webhook failures
+          try {
+            const cfStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+            logger.info({
+              orderId: payment.orderId,
+              cashfreeOrderId: payment.cashfreeOrderId,
+              currentStatus: payment.status,
+              cfStatus: cfStatus?.order_status
+            }, 'Cashfree status check for non-pending payment on success page');
+            
+            // If Cashfree shows PAID but our system doesn't have it as SUCCESS, credit coins
+            if (cfStatus?.order_status === 'PAID' && payment.status !== PaymentStatus.SUCCESS) {
+              logger.warn({
+                orderId: payment.orderId,
+                currentStatus: payment.status,
+                cfStatus: cfStatus?.order_status
+              }, 'Payment status mismatch on success page - Cashfree shows PAID but our system shows different status');
+              
+              try {
+                await coinService.creditCoins(
+                  payment.userId.toString(),
+                  payment.coins,
+                  TransactionType.PURCHASE,
+                  { orderId: payment.orderId, description: `Coin purchase - Order ${payment.orderId}` }
+                );
+                payment.status = PaymentStatus.SUCCESS;
+                await payment.save();
+                verifiedStatus = PaymentStatus.SUCCESS;
+                logger.info({ userId: payment.userId, orderId: payment.orderId, coins: payment.coins }, 'Coins credited for mismatched status on success page');
+              } catch (creditError) {
+                logger.error({ creditError, orderId: finalOrderId }, 'Failed to credit coins for mismatched status on success page');
+              }
+            }
+          } catch (creditErr) {
+            logger.warn({ creditErr, orderId: finalOrderId }, 'Could not check Cashfree status for non-pending payment on success page');
           }
         }
       }
@@ -548,6 +591,12 @@ router.get('/status/:orderId', async (req: Request, res: Response) => {
     if (payment.status === PaymentStatus.PENDING) {
       try {
         const cfStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+        logger.info({
+          orderId: payment.orderId,
+          cashfreeOrderId: payment.cashfreeOrderId,
+          cfStatus: cfStatus?.order_status
+        }, 'Cashfree status check result');
+        
         if (cfStatus?.order_status === 'PAID') {
           // IMPORTANT: Actually credit the coins, not just update status!
           try {
@@ -575,6 +624,47 @@ router.get('/status/:orderId', async (req: Request, res: Response) => {
         }
       } catch (err) {
         logger.warn({ err, orderId }, 'Could not check Cashfree status');
+      }
+    } else {
+      // Even if status is not PENDING, check Cashfree status to handle cases where
+      // webhook didn't arrive but payment was successful
+      try {
+        const cfStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
+        logger.info({
+          orderId: payment.orderId,
+          cashfreeOrderId: payment.cashfreeOrderId,
+          currentStatus: payment.status,
+          cfStatus: cfStatus?.order_status
+        }, 'Cashfree status check for non-pending payment');
+        
+        // If Cashfree shows PAID but our system doesn't have it as SUCCESS, credit coins
+        if (cfStatus?.order_status === 'PAID' && payment.status !== PaymentStatus.SUCCESS) {
+          logger.warn({
+            orderId: payment.orderId,
+            currentStatus: payment.status,
+            cfStatus: cfStatus?.order_status
+          }, 'Payment status mismatch - Cashfree shows PAID but our system shows different status');
+          
+          try {
+            await coinService.creditCoins(
+              payment.userId.toString(),
+              payment.coins,
+              TransactionType.PURCHASE,
+              { orderId: payment.orderId, description: `Coin purchase - Order ${payment.orderId}` }
+            );
+            payment.status = PaymentStatus.SUCCESS;
+            await payment.save();
+            logger.info({
+              userId: payment.userId,
+              orderId: payment.orderId,
+              coins: payment.coins
+            }, 'Coins credited for mismatched status');
+          } catch (creditError) {
+            logger.error({ creditError, orderId }, 'Failed to credit coins for mismatched status');
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, orderId }, 'Could not check Cashfree status for non-pending payment');
       }
     }
 
