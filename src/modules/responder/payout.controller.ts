@@ -289,6 +289,7 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
         await payout.save({ session });
 
         await session.commitTransaction();
+        session.endSession();
 
         logger.info({
           payoutId,
@@ -341,10 +342,15 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
         await session.commitTransaction();
         session.endSession();
 
-        throw new AppError(
-          500,
-          `Payout failed: ${cashfreeError.response?.data?.message || cashfreeError.message}`
-        );
+        // Return error response instead of throwing (transaction already committed)
+        res.status(500).json({
+          error: `Payout failed: ${cashfreeError.response?.data?.message || cashfreeError.message}`,
+          payout: {
+            id: payout._id,
+            status: payout.status,
+          },
+        });
+        return;
       }
     } else if (status === 'rejected') {
       // Payout rejected, revert coins
@@ -366,6 +372,7 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
       );
 
       await session.commitTransaction();
+      session.endSession();
 
       logger.info({
         payoutId,
@@ -386,13 +393,10 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
       });
       return;
     }
-
-
   } catch (error) {
     await session.abortTransaction();
-    throw error;
-  } finally {
     session.endSession();
+    throw error;
   }
 });
 

@@ -6,6 +6,7 @@ import * as adminVoiceController from './admin-voice.controller';
 import * as reportsController from './reports.controller';
 import * as coinConfigController from './coinConfig.controller';
 import * as payoutController from '../responder/payout.controller';
+import * as notificationController from './notification.controller';
 
 const router = Router();
 
@@ -53,5 +54,10 @@ router.get('/coin-plans', coinConfigController.getCoinPlans);
 router.post('/coin-plans', coinConfigController.createCoinPlan);
 router.put('/coin-plans/:planId', coinConfigController.updateCoinPlan);
 router.delete('/coin-plans/:planId', coinConfigController.deleteCoinPlan);
+
+// Notifications
+router.get('/notifications/stats', notificationController.getNotificationStats);
+router.post('/notifications/broadcast', notificationController.sendBroadcastNotification);
+router.post('/notifications/user/:userId', notificationController.sendUserNotification);
 
 export default router;
