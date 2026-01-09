@@ -21,6 +21,9 @@ router.post('/orders', paymentController.createOrder);
 // Get payment status
 router.get('/orders/:orderId', paymentController.getPaymentStatus);
 
+// Verify and process payment (manual trigger)
+router.post('/orders/:orderId/verify', paymentController.verifyPayment);
+
 // Get payment history
 router.get('/history', paymentController.getPaymentHistory);
 

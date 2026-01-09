@@ -25,7 +25,7 @@ export class PaymentController {
       }
 
       const order = await paymentService.createPaymentOrder(userId, planId);
-      
+
       res.json({
         success: true,
         data: order,
@@ -41,15 +41,32 @@ export class PaymentController {
       const signature = req.headers['x-webhook-signature'] as string;
       const rawBody = JSON.stringify(req.body);
 
+      logger.info({
+        webhookType: req.body?.type,
+        orderId: req.body?.data?.order?.order_id,
+        paymentStatus: req.body?.data?.payment?.payment_status,
+        hasSignature: !!signature,
+        signatureLength: signature?.length,
+        bodyKeys: Object.keys(req.body),
+      }, '📨 Webhook received');
+
       if (!signature) {
-        throw new AppError(400, 'Missing webhook signature');
+        logger.warn({ body: req.body }, 'Webhook received without signature - processing anyway');
       }
 
-      await paymentService.handlePaymentWebhook(req.body, signature, rawBody);
-      
+      await paymentService.handlePaymentWebhook(req.body, signature || '', rawBody);
+
+      logger.info({ webhookType: req.body?.type }, '✅ Webhook processed successfully');
       res.json({ success: true });
     } catch (error) {
-      logger.error({ error, body: req.body }, 'Failed to process payment webhook');
+      logger.error({
+        error,
+        body: req.body,
+        signature: req.headers['x-webhook-signature'],
+        errorMessage: (error as any)?.message,
+        errorStack: (error as any)?.stack,
+      }, '❌ Failed to process payment webhook');
+
       // Always return 200 to prevent webhook retries for invalid signatures
       res.status(200).json({ success: false, error: 'Webhook processing failed' });
     }
@@ -61,7 +78,7 @@ export class PaymentController {
       const userId = req.user!.id;
 
       const payment = await paymentService.getPaymentStatus(orderId, userId);
-      
+
       res.json({
         success: true,
         data: payment,
@@ -79,13 +96,32 @@ export class PaymentController {
       const limit = parseInt(req.query.limit as string) || 10;
 
       const history = await paymentService.getUserPaymentHistory(userId, page, limit);
-      
+
       res.json({
         success: true,
         data: history,
       });
     } catch (error) {
       logger.error({ error, userId: req.user?.id }, 'Failed to get payment history');
+      throw error;
+    }
+  }
+
+  async verifyPayment(req: Request, res: Response) {
+    try {
+      const { orderId } = req.params;
+      const userId = req.user!.id;
+
+      logger.info({ orderId, userId }, 'Manual payment verification requested');
+
+      const result = await paymentService.verifyAndProcessPendingPayment(orderId, userId);
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error({ error, orderId: req.params.orderId, userId: req.user?.id }, 'Failed to verify payment');
       throw error;
     }
   }
@@ -102,7 +138,7 @@ export class PaymentController {
       }
 
       const payment = await paymentService.refundPayment(orderId, adminId, reason);
-      
+
       res.json({
         success: true,
         data: payment,
