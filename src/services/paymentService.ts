@@ -183,6 +183,12 @@ export class PaymentService {
         }
       }, 'Payment record found!');
 
+      // Idempotency check - prevent processing the same webhook twice
+      if (payment_status === 'SUCCESS' && payment.status === PaymentStatus.SUCCESS) {
+        logger.info({ orderId: payment.orderId }, '⚠️ Payment already processed - skipping to prevent double coins');
+        return;
+      }
+
       payment.webhookData = webhookData;
       payment.cashfreePaymentId = cf_payment_id?.toString();
       if (payment_method) {
@@ -219,8 +225,20 @@ export class PaymentService {
         return;
       }
 
+      // CRITICAL: Update status and save FIRST to ensure idempotency works
       payment.status = PaymentStatus.SUCCESS;
+      await payment.save();
 
+      logger.info(
+        {
+          userId: payment.userId,
+          orderId: payment.orderId,
+          coins: payment.coins
+        },
+        '💰 Status saved, now crediting coins'
+      );
+
+      // Now credit coins
       await coinService.creditCoins(
         payment.userId.toString(),
         payment.coins,
@@ -234,12 +252,13 @@ export class PaymentService {
           orderId: payment.orderId,
           coins: payment.coins
         },
-        'Coins added for successful payment'
+        '✅ Coins credited successfully'
       );
     } catch (error) {
       logger.error({ error, orderId: payment.orderId }, 'Failed to process successful payment');
       payment.status = PaymentStatus.FAILED;
       payment.failureReason = 'Failed to add coins to user account';
+      await payment.save();
       throw error;
     }
   }
@@ -270,15 +289,31 @@ export class PaymentService {
     );
   }
 
-  private mapPaymentMethod(method: string) {
+  private mapPaymentMethod(method: any) {
+    // Handle both string and object formats from Cashfree
+    let methodType: string;
+
+    if (typeof method === 'string') {
+      methodType = method;
+    } else if (typeof method === 'object' && method !== null) {
+      // Extract payment type from object (e.g., { upi: {...} } or { card: {...} })
+      const keys = Object.keys(method);
+      methodType = keys.length > 0 ? keys[0] : 'unknown';
+    } else {
+      methodType = 'unknown';
+    }
+
     const methodMap: { [key: string]: string } = {
       'upi': 'upi',
       'cc': 'card',
       'dc': 'card',
+      'card': 'card',
       'nb': 'net_banking',
+      'netbanking': 'net_banking',
       'wallet': 'wallet',
     };
-    return methodMap[method] || method;
+
+    return methodMap[methodType.toLowerCase()] || 'upi';
   }
 
   async getPaymentStatus(orderId: string, userId: string) {
