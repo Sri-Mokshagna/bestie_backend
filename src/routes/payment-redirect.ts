@@ -16,12 +16,12 @@ router.get('/debug/:orderId', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
     const payment = await Payment.findOne({ orderId });
-    
+
     const appId = process.env.CASHFREE_APP_ID || '';
     const secretKey = process.env.CASHFREE_SECRET_KEY || '';
     const hasCredentials = appId.length > 0 && secretKey.length > 0;
     const hasTestMarkers = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
-    
+
     // Also fetch order status from Cashfree
     let cashfreeOrderStatus = null;
     let cashfreeError = null;
@@ -32,7 +32,7 @@ router.get('/debug/:orderId', async (req: Request, res: Response) => {
         cashfreeError = e.message;
       }
     }
-    
+
     res.json({
       orderId,
       paymentFound: !!payment,
@@ -77,9 +77,9 @@ async function recreatePaymentSession(payment: any): Promise<string | null> {
       }
     }
 
-    const serverUrl = process.env.SERVER_URL || 
-      (process.env.NODE_ENV === 'production' 
-        ? 'https://bestie-backend-zmj2.onrender.com' 
+    const serverUrl = process.env.SERVER_URL ||
+      (process.env.NODE_ENV === 'production'
+        ? 'https://bestie-backend-zmj2.onrender.com'
         : 'http://localhost:3000');
 
     // Generate customer email
@@ -89,10 +89,10 @@ async function recreatePaymentSession(payment: any): Promise<string | null> {
     // Note: We use a new order ID since Cashfree doesn't allow reusing order IDs
     const newOrderId = `${payment.orderId}_R${Date.now().toString(36)}`;
 
-    logger.info({ 
-      originalOrderId: payment.orderId, 
+    logger.info({
+      originalOrderId: payment.orderId,
       newOrderId,
-      amount: payment.amount 
+      amount: payment.amount
     }, 'Creating new Cashfree order for expired session');
 
     const result = await cashfreeService.createOrderAndGetLink({
@@ -114,17 +114,17 @@ async function recreatePaymentSession(payment: any): Promise<string | null> {
     payment.gatewayResponse = result.order;
     await payment.save();
 
-    logger.info({ 
+    logger.info({
       orderId: payment.orderId,
       newCashfreeOrderId: result.order.order_id,
-      hasSessionId: !!result.order.payment_session_id 
+      hasSessionId: !!result.order.payment_session_id
     }, 'Successfully recreated payment session');
 
     return result.order.payment_session_id;
   } catch (error: any) {
-    logger.error({ 
-      error: error.message, 
-      orderId: payment.orderId 
+    logger.error({
+      error: error.message,
+      orderId: payment.orderId
     }, 'Failed to recreate payment session');
     return null;
   }
@@ -175,7 +175,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
       try {
         const orderStatus = await cashfreeService.getPaymentStatus(payment.cashfreeOrderId);
         logger.info({ orderId: payment.orderId, cashfreeOrderId: payment.cashfreeOrderId, orderStatus: orderStatus?.order_status }, 'Checking current order status from Cashfree');
-        
+
         // If Cashfree says the order is expired or terminated, even though we have a session ID,
         // we need to recreate the order
         if (orderStatus?.order_status === 'EXPIRED' || orderStatus?.order_status === 'TERMINATED') {
@@ -201,7 +201,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
     // If no session ID, try to refresh or recreate
     if (!paymentSessionId) {
       logger.warn({ orderId, gatewayResponse: payment.gatewayResponse }, 'Payment session ID not found - attempting to recover');
-      
+
       try {
         const orderStatus = await cashfreeService.getPaymentStatus(orderId);
         if (orderStatus?.payment_session_id) {
@@ -239,7 +239,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
 
     // Determine environment
     let environment: 'sandbox' | 'production' = 'sandbox';
-    
+
     if (payment.gatewayResponse?._cashfree_environment) {
       environment = payment.gatewayResponse._cashfree_environment;
     } else {
@@ -249,7 +249,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
       const hasTestMarkers = appId.includes('TEST') || secretKey.includes('_test_') || secretKey.includes('test');
       environment = (!hasCredentials || hasTestMarkers) ? 'sandbox' : 'production';
     }
-    
+
     logger.info({
       orderId,
       sessionIdLength: paymentSessionId.length,
@@ -257,13 +257,11 @@ router.get('/initiate', async (req: Request, res: Response) => {
       amount: payment.amount,
     }, 'Rendering Cashfree SDK checkout page');
 
-    // Use Cashfree JS SDK to open checkout (per Cashfree support)
-    // MOBILE FIX: Set explicit headers and remove restrictive security headers
+    // CRITICAL: Set proper headers BEFORE sending response
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.removeHeader('X-Frame-Options');  // Allow framing for SDK
-    res.removeHeader('X-Content-Type-Options');  // Prevent MIME blocking
-    res.removeHeader('Cross-Origin-Embedder-Policy');  // Allow cross-origin
-    res.removeHeader('Cross-Origin-Opener-Policy');  // Allow popups
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+    // Use Cashfree JS SDK to open checkout (per Cashfree support)
     res.send(renderCashfreeSDKPage({
       orderId,
       paymentSessionId,
@@ -282,7 +280,7 @@ router.get('/initiate', async (req: Request, res: Response) => {
 
 /**
  * Render Cashfree JS SDK checkout page
- * Mobile-optimized: delayed execution + fallback button + direct link
+ * Mobile-optimized: Auto-executes SDK immediately, proper meta tags
  */
 function renderCashfreeSDKPage(options: {
   orderId: string;
@@ -291,23 +289,18 @@ function renderCashfreeSDKPage(options: {
   amount: number;
 }): string {
   const { paymentSessionId, environment, amount } = options;
-  
-  // Direct checkout URL as ultimate fallback
-  const cashfreeBaseUrl = environment === 'production' 
-    ? 'https://payments.cashfree.com/order' 
-    : 'https://payments-test.cashfree.com/order';
-  const directCheckoutUrl = `${cashfreeBaseUrl}/#${paymentSessionId}`;
-  
+
   return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="format-detection" content="telephone=no">
   <title>Payment - Bestie</title>
   <style>
-    * { box-sizing: border-box; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -315,140 +308,185 @@ function renderCashfreeSDKPage(options: {
       display: flex;
       align-items: center;
       justify-content: center;
-      margin: 0;
       padding: 20px;
     }
     .container {
       background: white;
       border-radius: 20px;
-      padding: 30px;
+      padding: 40px 30px;
       text-align: center;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      max-width: 380px;
+      max-width: 400px;
       width: 100%;
     }
-    h2 { color: #333; margin: 0 0 10px 0; font-size: 22px; }
-    .amount { font-size: 28px; color: #667eea; font-weight: bold; margin: 15px 0; }
-    .status { color: #666; margin-bottom: 20px; font-size: 14px; }
-    .pay-btn {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    h2 { 
+      color: #333; 
+      margin: 0 0 10px 0; 
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .amount { 
+      font-size: 32px; 
+      color: #667eea; 
+      font-weight: bold; 
+      margin: 20px 0; 
+    }
+    .status { 
+      color: #666; 
+      margin: 15px 0; 
+      font-size: 15px; 
+      line-height: 1.5;
+    }
+    .loader {
+      margin: 20px auto;
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .error { 
+      color: #c62828; 
+      font-size: 14px; 
+      margin-top: 20px; 
+      padding: 15px;
+      background: #ffebee;
+      border-radius: 8px;
+      display: none;
+    }
+    .retry-btn {
+      background: #667eea;
       color: white;
       border: none;
-      padding: 16px 32px;
-      border-radius: 30px;
-      font-size: 16px;
+      padding: 12px 30px;
+      border-radius: 25px;
+      font-size: 15px;
       font-weight: 600;
       cursor: pointer;
-      width: 100%;
-      max-width: 260px;
-      margin: 10px auto;
-      display: block;
-      text-decoration: none;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .pay-btn:active { transform: scale(0.98); }
-    .pay-btn:disabled { background: #ccc; cursor: not-allowed; }
-    .fallback-link {
-      display: block;
       margin-top: 15px;
-      color: #667eea;
-      font-size: 13px;
-      text-decoration: underline;
+      display: none;
     }
-    .error { color: #c62828; font-size: 13px; margin-top: 15px; display: none; }
-    .loader { display: none; margin: 15px auto; width: 30px; height: 30px; border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .retry-btn:active {
+      transform: scale(0.98);
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h2>Bestie Payment</h2>
-    <div class="amount">\u20B9${amount}</div>
-    <p class="status" id="status">Tap button to pay securely</p>
+    <div class="amount">₹${amount}</div>
+    <p class="status" id="status">Opening payment gateway...</p>
     <div class="loader" id="loader"></div>
-    <button class="pay-btn" id="payBtn" type="button">Pay Now</button>
-    <a href="${directCheckoutUrl}" class="fallback-link" id="fallbackLink">Click here if button doesn't work</a>
-    <p class="error" id="error"></p>
+    <div class="error" id="error"></div>
+    <button class="retry-btn" id="retryBtn">Retry Payment</button>
   </div>
 
-  <noscript>
-    <style>.pay-btn, .fallback-link { display: none !important; }</style>
-    <p style="text-align:center; margin-top:20px;">
-      <a href="${directCheckoutUrl}" style="background:#667eea;color:white;padding:15px 30px;border-radius:25px;text-decoration:none;display:inline-block;">Pay Now</a>
-    </p>
-  </noscript>
-
-  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+  <!-- Load Cashfree SDK -->
+  <script src="https://sdk.cashfree.com/js/v3/cashfree.js" async></script>
   
   <script>
     (function() {
-      var SESSION_ID = "${paymentSessionId}";
-      var ENV = "${environment}";
-      var DIRECT_URL = "${directCheckoutUrl}";
-      var paymentStarted = false;
+      'use strict';
       
-      var statusEl = document.getElementById('status');
-      var errorEl = document.getElementById('error');
-      var btnEl = document.getElementById('payBtn');
-      var loaderEl = document.getElementById('loader');
-      var fallbackEl = document.getElementById('fallbackLink');
+      const SESSION_ID = "${paymentSessionId}";
+      const ENV = "${environment}";
+      let attemptCount = 0;
+      const MAX_ATTEMPTS = 3;
+      
+      const statusEl = document.getElementById('status');
+      const errorEl = document.getElementById('error');
+      const loaderEl = document.getElementById('loader');
+      const retryBtn = document.getElementById('retryBtn');
       
       function showError(msg) {
-        if (statusEl) statusEl.textContent = 'Error';
-        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
-        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Try Again'; }
+        console.error('[Payment Error]', msg);
+        if (statusEl) statusEl.textContent = 'Payment Error';
+        if (errorEl) {
+          errorEl.textContent = msg;
+          errorEl.style.display = 'block';
+        }
         if (loaderEl) loaderEl.style.display = 'none';
-        paymentStarted = false;
-      }
-      
-      function startPayment() {
-        if (paymentStarted) return;
-        paymentStarted = true;
-        
-        if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Opening...'; }
-        if (statusEl) statusEl.textContent = 'Connecting to payment gateway...';
-        if (loaderEl) loaderEl.style.display = 'block';
-        if (fallbackEl) fallbackEl.style.display = 'none';
-        
-        try {
-          if (typeof Cashfree === 'undefined') {
-            // SDK not loaded - redirect directly
-            console.log('SDK not loaded, using direct URL');
-            window.location.href = DIRECT_URL;
-            return;
-          }
-          
-          var cashfree = Cashfree({ mode: ENV });
-          cashfree.checkout({
-            paymentSessionId: SESSION_ID,
-            redirectTarget: "_self"
-          });
-          
-          // Fallback: if checkout doesn't redirect in 5s, use direct URL
-          setTimeout(function() {
-            if (paymentStarted) {
-              console.log('Checkout timeout, using direct URL');
-              window.location.href = DIRECT_URL;
-            }
-          }, 5000);
-          
-        } catch (e) {
-          console.error('Payment error:', e);
-          // On any error, redirect to direct URL
-          window.location.href = DIRECT_URL;
+        if (retryBtn && attemptCount < MAX_ATTEMPTS) {
+          retryBtn.style.display = 'block';
         }
       }
       
-      // Button click handler
-      if (btnEl) {
-        btnEl.onclick = function(e) {
-          e.preventDefault();
-          startPayment();
+      function startPayment() {
+        attemptCount++;
+        console.log('[Payment] Starting payment, attempt:', attemptCount);
+        
+        if (statusEl) statusEl.textContent = 'Connecting to payment gateway...';
+        if (errorEl) errorEl.style.display = 'none';
+        if (retryBtn) retryBtn.style.display = 'none';
+        if (loaderEl) loaderEl.style.display = 'block';
+        
+        try {
+          if (typeof Cashfree === 'undefined') {
+            throw new Error('Cashfree SDK not loaded. Please check your internet connection.');
+          }
+          
+          console.log('[Payment] Initializing Cashfree SDK');
+          console.log('[Payment] Environment:', ENV);
+          console.log('[Payment] Session ID length:', SESSION_ID.length);
+          
+          const cashfree = Cashfree({ mode: ENV });
+          
+          console.log('[Payment] Opening checkout...');
+          cashfree.checkout({
+            paymentSessionId: SESSION_ID,
+            redirectTarget: "_self"
+          }).then(function(result) {
+            console.log('[Payment] Checkout completed:', result);
+          }).catch(function(error) {
+            console.error('[Payment] Checkout error:', error);
+            showError('Failed to open payment page: ' + (error.message || 'Unknown error'));
+          });
+          
+        } catch (e) {
+          console.error('[Payment] Exception:', e);
+          showError(e.message || 'An unexpected error occurred');
+        }
+      }
+      
+      // Retry button handler
+      if (retryBtn) {
+        retryBtn.onclick = function() {
+          if (attemptCount < MAX_ATTEMPTS) {
+            startPayment();
+          }
         };
       }
       
-      // Do NOT auto-start on mobile - wait for user tap
-      // This prevents mobile Chrome from blocking the page
+      // Auto-start when SDK loads
+      function initWhenReady() {
+        if (typeof Cashfree !== 'undefined') {
+          console.log('[Payment] SDK loaded, starting payment');
+          setTimeout(startPayment, 100); // Small delay for stability
+        } else {
+          console.log('[Payment] Waiting for SDK to load...');
+          setTimeout(initWhenReady, 100);
+        }
+      }
+      
+      // Start initialization check
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initWhenReady);
+      } else {
+        initWhenReady();
+      }
+      
+      // Timeout fallback
+      setTimeout(function() {
+        if (loaderEl && loaderEl.style.display !== 'none') {
+          showError('Payment gateway took too long to respond. Please try again.');
+        }
+      }, 15000); // 15 second timeout
+      
     })();
   </script>
 </body>
@@ -464,19 +502,19 @@ function renderCashfreeSDKPage(options: {
 router.get('/success', async (req: Request, res: Response) => {
   const { orderId, order_id } = req.query;
   const finalOrderId = (orderId || order_id || '') as string;
-  
+
   logger.info({ orderId: finalOrderId }, 'Payment success redirect');
 
   // Verify payment status and credit coins if needed
   let verifiedStatus = 'unknown';
   if (finalOrderId) {
     try {
-      const payment = await Payment.findOne({ 
+      const payment = await Payment.findOne({
         $or: [{ orderId: finalOrderId }, { cashfreeOrderId: finalOrderId }]
       });
       if (payment) {
         verifiedStatus = payment.status;
-        
+
         // If still pending, check with Cashfree and credit coins
         if (payment.status === PaymentStatus.PENDING) {
           try {
@@ -486,7 +524,7 @@ router.get('/success', async (req: Request, res: Response) => {
               cashfreeOrderId: payment.cashfreeOrderId,
               cfStatus: cfStatus?.order_status
             }, 'Cashfree status check result on success page');
-            
+
             if (cfStatus?.order_status === 'PAID') {
               // Credit coins
               await coinService.creditCoins(
@@ -513,7 +551,7 @@ router.get('/success', async (req: Request, res: Response) => {
               currentStatus: payment.status,
               cfStatus: cfStatus?.order_status
             }, 'Cashfree status check for non-pending payment on success page');
-            
+
             // If Cashfree shows PAID but our system doesn't have it as SUCCESS, credit coins
             if (cfStatus?.order_status === 'PAID' && payment.status !== PaymentStatus.SUCCESS) {
               logger.warn({
@@ -521,7 +559,7 @@ router.get('/success', async (req: Request, res: Response) => {
                 currentStatus: payment.status,
                 cfStatus: cfStatus?.order_status
               }, 'Payment status mismatch on success page - Cashfree shows PAID but our system shows different status');
-              
+
               try {
                 await coinService.creditCoins(
                   payment.userId.toString(),
@@ -559,11 +597,11 @@ router.get('/success', async (req: Request, res: Response) => {
 router.get('/failure', (req: Request, res: Response) => {
   const { orderId, order_id, error_code, error_description } = req.query;
   const finalOrderId = (orderId || order_id || '') as string;
-  
-  logger.info({ 
-    orderId: finalOrderId, 
-    error_code, 
-    error_description 
+
+  logger.info({
+    orderId: finalOrderId,
+    error_code,
+    error_description
   }, 'Payment failure redirect');
 
   const deepLink = `bestie://payment/failure?orderId=${finalOrderId}&error=${error_code || 'unknown'}`;
@@ -578,8 +616,8 @@ router.get('/failure', (req: Request, res: Response) => {
 router.get('/status/:orderId', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
-    
-    const payment = await Payment.findOne({ 
+
+    const payment = await Payment.findOne({
       $or: [{ orderId }, { cashfreeOrderId: orderId }]
     });
 
@@ -596,7 +634,7 @@ router.get('/status/:orderId', async (req: Request, res: Response) => {
           cashfreeOrderId: payment.cashfreeOrderId,
           cfStatus: cfStatus?.order_status
         }, 'Cashfree status check result');
-        
+
         if (cfStatus?.order_status === 'PAID') {
           // IMPORTANT: Actually credit the coins, not just update status!
           try {
@@ -636,7 +674,7 @@ router.get('/status/:orderId', async (req: Request, res: Response) => {
           currentStatus: payment.status,
           cfStatus: cfStatus?.order_status
         }, 'Cashfree status check for non-pending payment');
-        
+
         // If Cashfree shows PAID but our system doesn't have it as SUCCESS, credit coins
         if (cfStatus?.order_status === 'PAID' && payment.status !== PaymentStatus.SUCCESS) {
           logger.warn({
@@ -644,7 +682,7 @@ router.get('/status/:orderId', async (req: Request, res: Response) => {
             currentStatus: payment.status,
             cfStatus: cfStatus?.order_status
           }, 'Payment status mismatch - Cashfree shows PAID but our system shows different status');
-          
+
           try {
             await coinService.creditCoins(
               payment.userId.toString(),
@@ -695,16 +733,16 @@ function renderPaymentPage(options: {
   planName: string;
 }): string {
   const { orderId, paymentSessionId, environment, amount, planName } = options;
-  
+
   // Direct Cashfree hosted checkout URL - most reliable approach
-  const cashfreeBaseUrl = environment === 'production' 
-    ? 'https://payments.cashfree.com/order' 
+  const cashfreeBaseUrl = environment === 'production'
+    ? 'https://payments.cashfree.com/order'
     : 'https://payments-test.cashfree.com/order';
   const checkoutUrl = `${cashfreeBaseUrl}/#${paymentSessionId}`;
-  
+
   // Server URL for deep link
   const serverUrl = process.env.SERVER_URL || 'https://bestie-backend-zmj2.onrender.com';
-  
+
   return `
     <!DOCTYPE html>
     <html>
@@ -950,7 +988,7 @@ function renderSuccessPage(orderId: string, deepLink: string): string {
 
 function renderFailurePage(orderId: string, deepLink: string, errorDesc?: string): string {
   const errorMessage = errorDesc || 'Your payment could not be completed.';
-  
+
   return `
     <!DOCTYPE html>
     <html>
