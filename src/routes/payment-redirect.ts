@@ -257,7 +257,12 @@ router.get('/initiate', async (req: Request, res: Response) => {
       amount: payment.amount,
     }, 'Rendering Cashfree SDK checkout page');
 
-    // CRITICAL: Set proper headers BEFORE sending response
+    // CRITICAL: Remove restrictive CSP headers for mobile WebView
+    res.removeHeader('Content-Security-Policy');
+    res.removeHeader('X-Frame-Options');
+    res.removeHeader('X-Content-Type-Options');
+
+    // Set proper headers for WebView compatibility
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
