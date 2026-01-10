@@ -105,16 +105,30 @@ export class PaymentService {
         hasSessionId: !!result.order.payment_session_id,
       }, '✅ Payment order created successfully');
 
-      // Log the payment link for debugging
-      logger.info({ orderId, paymentLink: result.payment_link }, 'Payment link generated');
+      // Generate direct Cashfree checkout URL for mobile apps  
+      // Use the environment stored in gateway response
+      const environment = result.order._cashfree_environment || 'sandbox';
+      const directCheckoutUrl = environment === 'production'
+        ? `https://payments.cashfree.com/order/#${result.payment_session_id}`
+        : `https://payments-test.cashfree.com/order/#${result.payment_session_id}`;
 
-      // Return ONLY orderId and paymentSessionId for SDK checkout
+      logger.info({
+        orderId,
+        environment,
+        paymentLink: result.payment_link,
+        directCheckoutUrl
+      }, 'Payment link generated');
+
+      // Return both the redirect URL and direct checkout URL
+      // Mobile apps should use directCheckoutUrl, web can use payment_link
       return {
         orderId,
         paymentSessionId: result.payment_session_id,
         amount: plan.priceINR,
         coins: plan.coins,
         planName: plan.name,
+        payment_link: directCheckoutUrl, // Use direct URL for mobile
+        web_payment_link: result.payment_link, // Keep original for web
       };
     } catch (error) {
       logger.error({ error, userId, planId }, '❌ Failed to create payment order');
