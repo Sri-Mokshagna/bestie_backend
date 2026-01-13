@@ -33,11 +33,19 @@ export const authController = {
 
       // Set user online after successful login
       if (result.user) {
-        // Assuming 'User' model is imported or globally available
-        // If not, this line will cause a reference error.
-        // For example: import { User } from '../../models/User';
-        // This change adheres strictly to the provided instruction.
+        // Update User model
         await User.findByIdAndUpdate(result.user.id, { isOnline: true });
+
+        // CRITICAL FIX: Also update Responder model if user is a responder
+        // This ensures responder appears online in admin panel immediately after first login
+        if (result.user.role === 'responder') {
+          const { Responder } = require('../../models/Responder');
+          await Responder.findOneAndUpdate(
+            { userId: result.user.id },
+            { isOnline: true, lastOnlineAt: new Date() },
+            { upsert: false } // Don't create if doesn't exist
+          );
+        }
       }
 
       // Ensure response is sent properly
@@ -154,7 +162,7 @@ export const authController = {
     }
 
     const { fcmToken } = req.body;
-    
+
     if (!fcmToken || typeof fcmToken !== 'string') {
       throw new AppError(400, 'Valid FCM token is required');
     }

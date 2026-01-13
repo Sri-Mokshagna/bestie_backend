@@ -35,8 +35,8 @@ export const sendBroadcastNotification = asyncHandler(async (req: AuthRequest, r
     fcmToken: { $exists: true, $nin: [null, ''] },
   }).select('_id fcmToken profile.name role').lean();
 
-  logger.info({ 
-    totalUsers: users.length, 
+  logger.info({
+    totalUsers: users.length,
     targetRole: targetRole || 'all',
     title,
   }, '📢 Sending broadcast notification');
@@ -44,19 +44,36 @@ export const sendBroadcastNotification = asyncHandler(async (req: AuthRequest, r
   let successCount = 0;
   let failCount = 0;
 
+  // Prepare announcement notification data
+  const timestamp = new Date().toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  const notificationData = {
+    type: 'announcement',
+    title,
+    message: body,
+    timestamp,
+    ...data,
+  };
+
   // Send notifications in batches
   const batchSize = 50;
   for (let i = 0; i < users.length; i += batchSize) {
     const batch = users.slice(i, i + batchSize);
-    
+
     const promises = batch.map(async (user) => {
       try {
-        // Send push notification
+        // Send push notification with announcement type
         const pushSent = await pushNotificationService.sendNotification(
           user.fcmToken,
           title,
           body,
-          data || {}
+          notificationData
         );
 
         // Save to database (in-app notification)
@@ -65,7 +82,7 @@ export const sendBroadcastNotification = asyncHandler(async (req: AuthRequest, r
           NotificationType.GENERAL,
           title,
           body,
-          { ...data, broadcast: true }
+          { ...notificationData, broadcast: true }
         );
 
         if (pushSent) {
@@ -148,7 +165,7 @@ export const getNotificationStats = asyncHandler(async (req: AuthRequest, res: R
   });
 
   const totalActiveUsers = await User.countDocuments({ status: 'active' });
-  
+
   const usersByRole = await User.aggregate([
     { $match: { status: 'active', fcmToken: { $exists: true, $nin: [null, ''] } } },
     { $group: { _id: '$role', count: { $sum: 1 } } },
