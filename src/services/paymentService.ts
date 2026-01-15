@@ -220,16 +220,24 @@ export class PaymentService {
   }
 
   private async handleSuccessfulPayment(payment: IPayment) {
+    // CRITICAL: Use database transaction for atomic operations
+    // This ensures payment status + coin credit happen together or not at all
+    const mongoose = require('mongoose');
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-      // Idempotency check - prevent processing the same payment twice
+      // Idempotency check FIRST - prevent processing the same payment twice
       if (payment.status === PaymentStatus.SUCCESS) {
         logger.warn({ orderId: payment.orderId, currentStatus: payment.status }, 'Payment already processed as successful - skipping to prevent duplicate coins');
+        await session.abortTransaction();
+        session.endSession();
         return;
       }
 
-      // CRITICAL: Update status and save FIRST to ensure idempotency works
+      // ATOMIC OPERATION 1: Update payment status
       payment.status = PaymentStatus.SUCCESS;
-      await payment.save();
+      await payment.save({ session });
 
       logger.info(
         {
@@ -237,16 +245,21 @@ export class PaymentService {
           orderId: payment.orderId,
           coins: payment.coins
         },
-        '💰 Status saved, now crediting coins'
+        '💰 Payment status saved in transaction, now crediting coins'
       );
 
-      // Now credit coins
+      // ATOMIC OPERATION 2: Credit coins
       await coinService.creditCoins(
         payment.userId.toString(),
         payment.coins,
         TransactionType.PURCHASE,
-        { orderId: payment.orderId, description: `Coin purchase - Order ${payment.orderId}` }
+        { orderId: payment.orderId, description: `Coin purchase - Order ${payment.orderId}` },
+        session // Pass session for atomic operation
       );
+
+      // COMMIT: Both operations succeeded
+      await session.commitTransaction();
+      session.endSession();
 
       logger.info(
         {
@@ -254,13 +267,17 @@ export class PaymentService {
           orderId: payment.orderId,
           coins: payment.coins
         },
-        '✅ Coins credited successfully'
+        '✅ Transaction committed - Coins credited successfully'
       );
     } catch (error) {
-      logger.error({ error, orderId: payment.orderId }, 'Failed to process successful payment');
+      // ROLLBACK: If anything fails, undo everything
+      await session.abortTransaction();
+      session.endSession();
+
+      logger.error({ error, orderId: payment.orderId }, '❌ Transaction failed - rolled back');
       payment.status = PaymentStatus.FAILED;
       payment.failureReason = 'Failed to add coins to user account';
-      await payment.save();
+      await payment.save(); // Save failure status (outside transaction)
       throw error;
     }
   }

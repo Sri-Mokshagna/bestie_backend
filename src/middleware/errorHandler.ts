@@ -1,21 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../lib/logger';
+import { captureError } from '../lib/sentry';
+
 
 export class AppError extends Error {
   public code?: string;
-  
+
   constructor(
     public statusCode: number,
     public message: string,
     codeOrOperational?: string | boolean
   ) {
     super(message);
-    
+
     // Handle both old signature (boolean) and new signature (string code)
     if (typeof codeOrOperational === 'string') {
       this.code = codeOrOperational;
     }
-    
+
     Object.setPrototypeOf(this, AppError.prototype);
   }
 }
@@ -38,7 +40,7 @@ export const errorHandler = (
     const response: any = {
       error: err.message,
     };
-    
+
     if (err.code) {
       response.code = err.code;
     }
@@ -46,12 +48,19 @@ export const errorHandler = (
     return res.status(err.statusCode).json(response);
   }
 
-  // Unhandled errors
+  // Unhandled errors - send to Sentry for monitoring
   logger.error({
     error: err.message,
     stack: err.stack,
     path: req.path,
     method: req.method,
+  });
+
+  // ADDITIVE: Send unexpected errors to Sentry (if configured)
+  captureError(err, {
+    path: req.path,
+    method: req.method,
+    userId: (req as any).user?.id,
   });
 
   return res.status(500).json({

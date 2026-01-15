@@ -17,7 +17,7 @@ export class CoinService {
   private configCacheTime: number = 0;
   private readonly CACHE_TTL = 60000; // 1 minute cache
 
-  private constructor() {}
+  private constructor() { }
 
   static getInstance(): CoinService {
     if (!CoinService.instance) {
@@ -133,11 +133,11 @@ export class CoinService {
 
       await Responder.findOneAndUpdate(
         { userId: responderId },
-        { 
-          $inc: { 
+        {
+          $inc: {
             'earnings.totalCoins': responderCoins,
-            'earnings.pendingCoins': responderCoins 
-          } 
+            'earnings.pendingCoins': responderCoins
+          }
         },
         { session }
       );
@@ -241,11 +241,11 @@ export class CoinService {
 
       await Responder.findOneAndUpdate(
         { userId: responderId },
-        { 
-          $inc: { 
+        {
+          $inc: {
             'earnings.totalCoins': responderCoins,
-            'earnings.pendingCoins': responderCoins 
-          } 
+            'earnings.pendingCoins': responderCoins
+          }
         },
         { session }
       );
@@ -259,11 +259,11 @@ export class CoinService {
             type: TransactionType.CALL,
             coins: -coinsToDeduct,
             status: TransactionStatus.COMPLETED,
-            meta: { 
-              callId, 
-              callType, 
+            meta: {
+              callId,
+              callType,
               durationSeconds,
-              responderEarned: responderCoins 
+              responderEarned: responderCoins
             },
           },
         ],
@@ -298,15 +298,22 @@ export class CoinService {
 
   /**
    * Credit coins to user (for purchases, gifts, etc.)
+   * Can optionally accept a session for transaction coordination
    */
   async creditCoins(
     userId: string,
     coins: number,
     type: TransactionType,
-    meta?: Record<string, any>
+    meta?: Record<string, any>,
+    externalSession?: any // Optional: for coordinating with parent transaction
   ): Promise<number> {
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    // If external session provided, use it; otherwise create our own
+    const shouldManageSession = !externalSession;
+    const session = externalSession || await mongoose.startSession();
+
+    if (shouldManageSession) {
+      session.startTransaction();
+    }
 
     try {
       const user = await User.findByIdAndUpdate(
@@ -332,7 +339,9 @@ export class CoinService {
         { session }
       );
 
-      await session.commitTransaction();
+      if (shouldManageSession) {
+        await session.commitTransaction();
+      }
 
       logger.info({
         msg: 'Coins credited',
@@ -344,10 +353,14 @@ export class CoinService {
 
       return user.coinBalance;
     } catch (error) {
-      await session.abortTransaction();
+      if (shouldManageSession) {
+        await session.abortTransaction();
+      }
       throw error;
     } finally {
-      session.endSession();
+      if (shouldManageSession) {
+        session.endSession();
+      }
     }
   }
 
@@ -356,7 +369,7 @@ export class CoinService {
    */
   async initializeUserCoins(userId: string): Promise<number> {
     const config = await this.getConfig();
-    
+
     if (config.initialUserCoins > 0) {
       return await this.creditCoins(
         userId,
