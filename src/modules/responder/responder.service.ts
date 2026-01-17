@@ -26,10 +26,9 @@ export const responderService = {
 
     // Transform to include responder-specific data
     const respondersWithData = responders.map(user => {
-      // FIXED: Online status should ONLY check isOnline, not availability flags
-      // Availability flags (audio/video/chatEnabled) indicate FEATURES, not ONLINE status
-      // This prevents offline responders from showing as "online" when they're disconnected
-      const effectivelyOnline = user.isOnline; // Only actual connection status
+      // Consider responder online if isOnline is true OR any availability is enabled
+      const hasAnyEnabled = user.audioEnabled || user.videoEnabled || user.chatEnabled;
+      const effectivelyOnline = user.isOnline || hasAnyEnabled;
 
       return {
         id: (user._id as any).toString(),
@@ -81,8 +80,9 @@ export const responderService = {
       throw new AppError(400, 'Responder is not active');
     }
 
-    // FIXED: Online status should ONLY check isOnline
-    const effectivelyOnline = user.isOnline;
+    // Calculate effectively online - matches getActiveResponders logic
+    const hasAnyEnabled = user.audioEnabled || user.videoEnabled || user.chatEnabled;
+    const effectivelyOnline = user.isOnline || hasAnyEnabled;
 
     return {
       id: (user._id as any).toString(),

@@ -298,22 +298,15 @@ export class CoinService {
 
   /**
    * Credit coins to user (for purchases, gifts, etc.)
-   * Can optionally accept a session for transaction coordination
    */
   async creditCoins(
     userId: string,
     coins: number,
     type: TransactionType,
-    meta?: Record<string, any>,
-    externalSession?: any // Optional: for coordinating with parent transaction
+    meta?: Record<string, any>
   ): Promise<number> {
-    // If external session provided, use it; otherwise create our own
-    const shouldManageSession = !externalSession;
-    const session = externalSession || await mongoose.startSession();
-
-    if (shouldManageSession) {
-      session.startTransaction();
-    }
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
     try {
       const user = await User.findByIdAndUpdate(
@@ -339,9 +332,7 @@ export class CoinService {
         { session }
       );
 
-      if (shouldManageSession) {
-        await session.commitTransaction();
-      }
+      await session.commitTransaction();
 
       logger.info({
         msg: 'Coins credited',
@@ -353,14 +344,10 @@ export class CoinService {
 
       return user.coinBalance;
     } catch (error) {
-      if (shouldManageSession) {
-        await session.abortTransaction();
-      }
+      await session.abortTransaction();
       throw error;
     } finally {
-      if (shouldManageSession) {
-        session.endSession();
-      }
+      session.endSession();
     }
   }
 

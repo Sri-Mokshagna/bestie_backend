@@ -1,7 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../lib/logger';
-import { captureError } from '../lib/sentry';
-
 
 export class AppError extends Error {
   public code?: string;
@@ -48,19 +46,12 @@ export const errorHandler = (
     return res.status(err.statusCode).json(response);
   }
 
-  // Unhandled errors - send to Sentry for monitoring
+  // Unhandled errors
   logger.error({
     error: err.message,
     stack: err.stack,
     path: req.path,
     method: req.method,
-  });
-
-  // ADDITIVE: Send unexpected errors to Sentry (if configured)
-  captureError(err, {
-    path: req.path,
-    method: req.method,
-    userId: (req as any).user?.id,
   });
 
   return res.status(500).json({

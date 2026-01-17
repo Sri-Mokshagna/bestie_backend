@@ -1,8 +1,4 @@
 import 'dotenv/config';
-// ADDITIVE: Initialize Sentry FIRST to catch all errors (optional - app works without it)
-import { initializeSentry } from './lib/sentry';
-initializeSentry();
-
 import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
@@ -16,8 +12,6 @@ import { logger } from './lib/logger';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { initializeChatSocket } from './modules/chat/chat.socket';
 import { setSocketIO } from './lib/socket';
-import { CallCleanupService } from './services/callCleanupService';
-
 
 
 // Import routes
@@ -192,18 +186,6 @@ async function start() {
     // Initialize Firebase
     initializeFirebase();
 
-    // ADDITIVE: Start background cleanup service (non-breaking safety feature)
-    // This runs every 2 minutes to fix stuck inCall flags from edge cases
-    // If it fails, existing call functionality continues to work normally
-    try {
-      CallCleanupService.start();
-      logger.info('✅ Background safety services started');
-    } catch (error: any) {
-      // Non-critical - app works without it, just logs warning
-      logger.warn({ error: error.message }, '⚠️ Background cleanup service failed to start (non-critical)');
-    }
-
-
     // Start server - Listen on all network interfaces (0.0.0.0)
     const port = typeof PORT === 'string' ? parseInt(PORT) : PORT;
     httpServer.listen(port, '0.0.0.0', () => {
@@ -232,10 +214,6 @@ start();
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM signal received: closing HTTP server');
-
-  // Stop background services
-  CallCleanupService.stop();
-
   httpServer.close(() => {
     logger.info('HTTP server closed');
   });
