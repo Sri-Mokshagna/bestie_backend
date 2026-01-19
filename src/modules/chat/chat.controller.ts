@@ -4,6 +4,8 @@ import { AuthRequest } from '../../middleware/auth';
 import { Chat, Message } from '../../models/Chat';
 import { User } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
+import { pushNotificationService } from '../../services/pushNotificationService';
+import { logger } from '../../lib/logger';
 
 export const chatController = {
   async getChats(req: AuthRequest, res: Response) {
@@ -233,5 +235,45 @@ export const chatController = {
         readAt: createdMessage!.readAt,
       },
     });
+    
+    // PUSH NOTIFICATION: Send push notification to recipient (non-blocking)
+    // This runs after response is sent to avoid slowing down the API
+    (async () => {
+      try {
+        // Find the recipient (other participant)
+        const recipientId = chat.participants.find(
+          (p) => p.toString() !== req.user!.id
+        )?.toString();
+        
+        if (recipientId) {
+          const [recipient, sender] = await Promise.all([
+            User.findById(recipientId).select('fcmToken profile phone').lean(),
+            User.findById(req.user!.id).select('profile phone').lean(),
+          ]);
+          
+          if (recipient?.fcmToken) {
+            const senderName = sender?.profile?.name || sender?.phone || 'Someone';
+            const messageContent = content.trim();
+            
+            await pushNotificationService.sendNotification(
+              recipient.fcmToken,
+              'New Message',
+              `${senderName}: ${messageContent.length > 50 ? messageContent.substring(0, 50) + '...' : messageContent}`,
+              {
+                type: 'new_message',
+                chatId: chatId,
+                senderId: req.user!.id,
+                senderName: senderName,
+                messagePreview: messageContent.length > 100 ? messageContent.substring(0, 100) : messageContent,
+              }
+            );
+            logger.debug(`Chat notification sent to ${recipientId} via HTTP`);
+          }
+        }
+      } catch (notifError) {
+        // Non-blocking - log but don't fail
+        logger.warn({ msg: 'Failed to send chat notification via HTTP', error: notifError });
+      }
+    })();
   },
 };

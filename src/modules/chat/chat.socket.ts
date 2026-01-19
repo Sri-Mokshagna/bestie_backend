@@ -7,6 +7,7 @@ import { Responder } from '../../models/Responder';
 import { coinService } from '../../services/coinService';
 import { logger } from '../../lib/logger';
 import { getAuth } from 'firebase-admin/auth';
+import { pushNotificationService } from '../../services/pushNotificationService';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -212,6 +213,38 @@ export function initializeChatSocket(io: SocketServer) {
         ).exec().catch(err => {
           logger.error(`Failed to update chat lastMessageAt: ${err}`);
         });
+        
+        // PUSH NOTIFICATION: Send push notification to recipient if they're not in the chat room
+        // This ensures they get notified even if app is in background
+        try {
+          const recipientId = responderId.toString();
+          const [recipient, sender] = await Promise.all([
+            User.findById(recipientId).select('fcmToken profile phone').lean(),
+            User.findById(socket.userId).select('profile phone').lean(),
+          ]);
+          
+          if (recipient?.fcmToken) {
+            const senderName = sender?.profile?.name || sender?.phone || 'Someone';
+            
+            // Send push notification for new message
+            await pushNotificationService.sendNotification(
+              recipient.fcmToken,
+              'New Message',
+              `${senderName}: ${body.length > 50 ? body.substring(0, 50) + '...' : body}`,
+              {
+                type: 'new_message',
+                chatId: roomId,
+                senderId: socket.userId!,
+                senderName: senderName,
+                messagePreview: body.length > 100 ? body.substring(0, 100) : body,
+              }
+            );
+            logger.debug(`Chat notification sent to ${recipientId}`);
+          }
+        } catch (notifError) {
+          // Non-blocking - don't fail message send if notification fails
+          logger.warn({ msg: 'Failed to send chat notification', error: notifError });
+        }
 
         logger.info(
           `Message sent in room ${roomId} by user ${socket.userId}, coins deducted: ${result.coinsDeducted}`
