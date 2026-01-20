@@ -214,32 +214,43 @@ export function initializeChatSocket(io: SocketServer) {
           logger.error(`Failed to update chat lastMessageAt: ${err}`);
         });
         
-        // PUSH NOTIFICATION: Send push notification to recipient if they're not in the chat room
+        // PUSH NOTIFICATION: Send push notification to recipient if they're NOT in the chat room
         // This ensures they get notified even if app is in background
+        // Skip notification if recipient is actively in the room (they'll see message via socket)
         try {
           const recipientId = responderId.toString();
-          const [recipient, sender] = await Promise.all([
-            User.findById(recipientId).select('fcmToken profile phone').lean(),
-            User.findById(socket.userId).select('profile phone').lean(),
-          ]);
           
-          if (recipient?.fcmToken) {
-            const senderName = sender?.profile?.name || sender?.phone || 'Someone';
+          // Check if recipient is in the room (actively viewing chat)
+          const recipientSockets = await io.in(roomId).fetchSockets();
+          const isRecipientInRoom = recipientSockets.some((s: any) => s.userId === recipientId);
+          
+          // Only send push notification if recipient is NOT in the room
+          if (!isRecipientInRoom) {
+            const [recipient, sender] = await Promise.all([
+              User.findById(recipientId).select('fcmToken profile phone').lean(),
+              User.findById(socket.userId).select('profile phone').lean(),
+            ]);
             
-            // Send push notification for new message
-            await pushNotificationService.sendNotification(
-              recipient.fcmToken,
-              'New Message',
-              `${senderName}: ${body.length > 50 ? body.substring(0, 50) + '...' : body}`,
-              {
-                type: 'new_message',
-                chatId: roomId,
-                senderId: socket.userId!,
-                senderName: senderName,
-                messagePreview: body.length > 100 ? body.substring(0, 100) : body,
-              }
-            );
-            logger.debug(`Chat notification sent to ${recipientId}`);
+            if (recipient?.fcmToken) {
+              const senderName = sender?.profile?.name || sender?.phone || 'Someone';
+              
+              // Send push notification for new message
+              await pushNotificationService.sendNotification(
+                recipient.fcmToken,
+                'New Message',
+                `${senderName}: ${body.length > 50 ? body.substring(0, 50) + '...' : body}`,
+                {
+                  type: 'new_message',
+                  chatId: roomId,
+                  senderId: socket.userId!,
+                  senderName: senderName,
+                  messagePreview: body.length > 100 ? body.substring(0, 100) : body,
+                }
+              );
+              logger.debug(`Chat notification sent to ${recipientId} (not in room)`);
+            }
+          } else {
+            logger.debug(`Recipient ${recipientId} is in room - skipping push notification`);
           }
         } catch (notifError) {
           // Non-blocking - don't fail message send if notification fails

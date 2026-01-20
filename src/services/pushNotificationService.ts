@@ -137,14 +137,29 @@ export const pushNotificationService = {
     fcmToken: string,
     title: string,
     body: string,
-    data?: Record<string, string>
+    data?: Record<string, string>,
+    options?: {
+      channelId?: string;
+      priority?: 'high' | 'default' | 'low';
+      sound?: boolean;
+    }
   ): Promise<boolean> {
     if (!fcmToken) {
       return false;
     }
 
     try {
-      const message = {
+      // Determine channel ID based on notification type
+      const channelId = options?.channelId || data?.type === 'new_message' || data?.type === 'chat_message'
+        ? 'messages'
+        : data?.type === 'announcement'
+          ? 'announcements'
+          : 'general';
+
+      const priority = options?.priority || 'high';
+      const enableSound = options?.sound !== false;
+
+      const message: any = {
         token: fcmToken,
         notification: {
           title,
@@ -152,11 +167,33 @@ export const pushNotificationService = {
         },
         data: data || {},
         android: {
-          priority: 'high' as const,
+          priority: priority,
+          notification: {
+            channelId: channelId,
+            priority: priority === 'high' ? 'max' : 'default',
+            sound: enableSound ? 'default' : undefined,
+            defaultVibrateTimings: true,
+          },
+        },
+        apns: {
+          headers: {
+            'apns-priority': priority === 'high' ? '10' : '5',
+          },
+          payload: {
+            aps: {
+              alert: {
+                title,
+                body,
+              },
+              sound: enableSound ? 'default' : undefined,
+              badge: 1,
+            },
+          },
         },
       };
 
       await admin.messaging().send(message);
+      logger.debug({ channelId, type: data?.type }, 'Push notification sent successfully');
       return true;
     } catch (error) {
       logger.error({ error }, 'Failed to send notification');
