@@ -132,6 +132,7 @@ export const pushNotificationService = {
 
   /**
    * Send a generic notification
+   * For killed app delivery, we use high priority and proper data payloads
    */
   async sendNotification(
     fcmToken: string,
@@ -145,39 +146,66 @@ export const pushNotificationService = {
     }
   ): Promise<boolean> {
     if (!fcmToken) {
+      logger.warn('sendNotification called without FCM token');
       return false;
     }
 
     try {
       // Determine channel ID based on notification type
-      const channelId = options?.channelId || data?.type === 'new_message' || data?.type === 'chat_message'
-        ? 'messages'
-        : data?.type === 'announcement'
-          ? 'announcements'
-          : 'general';
+      // Use explicit parentheses to avoid operator precedence issues
+      let channelId = 'general';
+      if (options?.channelId) {
+        channelId = options.channelId;
+      } else if (data?.type === 'new_message' || data?.type === 'chat_message') {
+        channelId = 'messages';
+      } else if (data?.type === 'announcement') {
+        channelId = 'announcements';
+      }
 
-      const priority = options?.priority || 'high';
+      // For messages and announcements, always use high priority to ensure delivery when app is killed
+      const isImportant = channelId === 'messages' || channelId === 'announcements' || channelId === 'incoming_calls';
+      const priority = options?.priority || (isImportant ? 'high' : 'default');
       const enableSound = options?.sound !== false;
+
+      logger.info({
+        msg: 'Sending push notification',
+        type: data?.type,
+        channelId,
+        priority,
+        tokenPrefix: fcmToken.substring(0, 20),
+      });
 
       const message: any = {
         token: fcmToken,
+        // Notification payload - required for system to show notification when app is killed
         notification: {
           title,
           body,
         },
-        data: data || {},
+        // Data payload - always delivered even when app is killed
+        data: {
+          ...data,
+          // Add click_action for proper tap handling
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
         android: {
-          priority: priority,
+          // HIGH priority ensures immediate delivery even when device is in Doze mode
+          priority: priority as 'high' | 'normal',
+          // TTL of 4 hours for messages to be delivered when device comes online
+          ttl: 14400000,
           notification: {
             channelId: channelId,
             priority: priority === 'high' ? 'max' : 'default',
             sound: enableSound ? 'default' : undefined,
             defaultVibrateTimings: true,
+            // Show on lock screen
+            visibility: 'public' as const,
           },
         },
         apns: {
           headers: {
             'apns-priority': priority === 'high' ? '10' : '5',
+            'apns-push-type': 'alert',
           },
           payload: {
             aps: {
@@ -187,16 +215,25 @@ export const pushNotificationService = {
               },
               sound: enableSound ? 'default' : undefined,
               badge: 1,
+              // content-available: 1 wakes up the app in background
+              'content-available': 1,
             },
           },
         },
       };
 
       await admin.messaging().send(message);
-      logger.debug({ channelId, type: data?.type }, 'Push notification sent successfully');
+      logger.info({ channelId, type: data?.type }, 'Push notification sent successfully');
       return true;
-    } catch (error) {
-      logger.error({ error }, 'Failed to send notification');
+    } catch (error: any) {
+      // Log specific error types
+      if (error.code === 'messaging/registration-token-not-registered') {
+        logger.warn({ fcmToken: fcmToken.substring(0, 20) + '...' }, 'FCM token invalid/expired - user may need to re-login');
+      } else if (error.code === 'messaging/invalid-argument') {
+        logger.warn({ error: error.message }, 'Invalid FCM message format');
+      } else {
+        logger.error({ error, code: error.code }, 'Failed to send notification');
+      }
       return false;
     }
   },
