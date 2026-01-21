@@ -20,6 +20,8 @@ export interface IUserProfile {
   language?: string;
   voiceText?: string;
   voiceBlob?: string;
+  voiceVerificationStatus?: 'pending' | 'approved' | 'rejected';
+  voiceVerifiedAt?: Date;
 }
 
 export interface INotificationPreferences {

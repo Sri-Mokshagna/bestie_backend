@@ -28,6 +28,7 @@ router.delete('/responders/:responderId', adminVoiceController.deleteResponderAc
 
 // Voice recordings
 router.get('/voice-recordings', adminVoiceController.getRespondersWithVoiceRecordings);
+router.post('/responders/:responderId/verify-voice', adminVoiceController.verifyVoiceRecording);
 
 // Reports
 router.get('/reports', reportsController.getReportedUsers);
