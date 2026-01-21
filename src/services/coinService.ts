@@ -114,7 +114,7 @@ export class CoinService {
       // Determine who is the user and who is the responder
       const [sender, recipient] = await Promise.all([
         User.findById(senderId).select('role coinBalance').session(session),
-        User.findById(recipientId).select('role').session(session),
+        User.findById(recipientId).select('role coinBalance').session(session),
       ]);
 
       if (!sender) {
@@ -126,25 +126,23 @@ export class CoinService {
 
       let actualUserId: string;
       let actualResponderId: string;
+      let user: any;
 
       // Identify who is the user (the one to be charged)
       if (sender.role === 'user') {
         actualUserId = senderId;
         actualResponderId = recipientId;
+        user = sender; // User is already fetched
       } else if (sender.role === 'responder') {
         // If responder is sending, the USER (recipient) should be charged
         actualUserId = recipientId;
         actualResponderId = senderId;
+        user = recipient; // User is already fetched
       } else {
         throw new AppError(400, 'Invalid sender role');
       }
 
-      // Check and deduct from USER (not sender if sender is responder)
-      const user = await User.findById(actualUserId).session(session);
-      if (!user) {
-        throw new AppError(404, 'User not found');
-      }
-
+      // Check balance (user is already fetched above)
       if (user.coinBalance < coinsToDeduct) {
         throw new AppError(400, 'Insufficient coins', 'INSUFFICIENT_COINS');
       }
