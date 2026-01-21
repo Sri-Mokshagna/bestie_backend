@@ -39,6 +39,7 @@ export interface IUser extends Document {
   fcmToken?: string; // Firebase Cloud Messaging token for push notifications
   role: UserRole;
   coinBalance: number;
+  rewardPoints: number; // Points earned from watching ads, referrals, etc.
   profile: IUserProfile;
   password?: string; // For admin login
   status: UserStatus;
@@ -80,6 +81,11 @@ const userSchema = new Schema<IUser>(
       default: UserRole.USER,
     },
     coinBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    rewardPoints: {
       type: Number,
       default: 0,
       min: 0,

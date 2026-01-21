@@ -21,11 +21,8 @@ export const getRewards = async (req: Request, res: Response) => {
         // Count referrals
         const referralCount = await User.countDocuments({ referredBy: user.referralCode });
 
-        // Calculate reward points (example: 10 points per referral)
-        const points = referralCount * 10;
-
         res.json({
-            points,
+            points: user.rewardPoints || 0,
             referralCode: user.referralCode,
             referralCount,
         });
@@ -35,14 +32,29 @@ export const getRewards = async (req: Request, res: Response) => {
     }
 };
 
-// Redeem reward
+// Redeem reward - convert points to coins
 export const redeemReward = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.id;
-        const { rewardType, pointsCost } = req.body;
+        const { pointsToRedeem, coinsToReceive } = req.body;
 
-        if (!rewardType || !pointsCost) {
-            return res.status(400).json({ error: 'Reward type and points cost are required' });
+        if (!pointsToRedeem || !coinsToReceive) {
+            return res.status(400).json({ error: 'Points to redeem and coins to receive are required' });
+        }
+
+        // Validate redemption rates
+        const validRedemptions = [
+            { points: 100, coins: 50 },
+            { points: 200, coins: 100 },
+            { points: 500, coins: 250 },
+        ];
+
+        const isValid = validRedemptions.some(
+            r => r.points === pointsToRedeem && r.coins === coinsToReceive
+        );
+
+        if (!isValid) {
+            return res.status(400).json({ error: 'Invalid redemption rate' });
         }
 
         const user = await User.findById(userId);
@@ -50,34 +62,21 @@ export const redeemReward = async (req: Request, res: Response) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        // Count referrals
-        const referralCount = await User.countDocuments({ referredBy: user.referralCode });
-        const points = referralCount * 10;
-
-        if (points < pointsCost) {
+        // Check if user has enough points
+        if ((user.rewardPoints || 0) < pointsToRedeem) {
             return res.status(400).json({ error: 'Insufficient reward points' });
         }
 
-        // Determine coins based on reward type
-        let coinsToAdd = 0;
-        if (rewardType === '50_coins' && pointsCost === 100) {
-            coinsToAdd = 50;
-        } else if (rewardType === '100_coins' && pointsCost === 200) {
-            coinsToAdd = 100;
-        } else if (rewardType === '250_coins' && pointsCost === 500) {
-            coinsToAdd = 250;
-        } else {
-            return res.status(400).json({ error: 'Invalid reward type' });
-        }
-
-        // Add coins to user
-        user.coinBalance += coinsToAdd;
+        // Deduct points and add coins
+        user.rewardPoints = (user.rewardPoints || 0) - pointsToRedeem;
+        user.coinBalance += coinsToReceive;
         await user.save();
 
         res.json({
             message: 'Reward redeemed successfully',
-            coinsAdded: coinsToAdd,
-            newBalance: user.coinBalance,
+            coinsAdded: coinsToReceive,
+            coinBalance: user.coinBalance,
+            remainingPoints: user.rewardPoints,
         });
     } catch (error) {
         console.error('Redeem reward error:', error);

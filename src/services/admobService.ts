@@ -23,7 +23,8 @@ interface AdMobSSVPayload {
 }
 
 interface AdRewardConfig {
-  rewardedVideoCoins: number;
+  adRewardPoints: number; // Points earned per rewarded video ad (configurable by admin)
+  rewardedVideoCoins: number; // Deprecated
   interstitialCoins: number;
   bannerClickCoins: number;
   enabled: boolean;
@@ -31,22 +32,20 @@ interface AdRewardConfig {
 
 export class AdMobService {
   private static instance: AdMobService;
-  
+
   // Default reward configuration
   private rewardConfig: AdRewardConfig = {
-    rewardedVideoCoins: 5, // 5 coins per rewarded video
-    interstitialCoins: 1, // 1 coin per interstitial
-    bannerClickCoins: 0, // No coins for banner clicks
+    adRewardPoints: 10, // 10 points per ad (configurable by admin)
+    rewardedVideoCoins: 0, // No longer used
+    interstitialCoins: 0,
+    bannerClickCoins: 0,
     enabled: true,
   };
 
   private constructor() {
     // Load config from environment
-    this.rewardConfig.rewardedVideoCoins = parseInt(
-      process.env.ADMOB_REWARDED_VIDEO_COINS || '5'
-    );
-    this.rewardConfig.interstitialCoins = parseInt(
-      process.env.ADMOB_INTERSTITIAL_COINS || '1'
+    this.rewardConfig.adRewardPoints = parseInt(
+      process.env.ADMOB_AD_REWARD_POINTS || '10'
     );
     this.rewardConfig.enabled = process.env.ADMOB_REWARDS_ENABLED !== 'false';
   }
@@ -85,7 +84,7 @@ export class AdMobService {
       // Verify signature using Google's public key
       // In production, implement proper signature verification
       // For now, we'll do basic validation
-      
+
       if (!payload.user_id || !payload.transaction_id || !payload.reward_amount) {
         logger.warn({ msg: 'Invalid SSV payload', payload });
         return false;
@@ -119,13 +118,13 @@ export class AdMobService {
   }
 
   /**
-   * Credit coins for rewarded video ad
+   * Credit reward points for rewarded video ad (NO COINS)
    */
   async creditRewardedVideo(
     userId: string,
     adUnitId: string,
     transactionId?: string
-  ): Promise<{ success: boolean; coins: number; balance: number }> {
+  ): Promise<{ success: boolean; points: number; rewardPoints: number }> {
     if (!this.rewardConfig.enabled) {
       throw new Error('Ad rewards are currently disabled');
     }
@@ -140,10 +139,10 @@ export class AdMobService {
         throw new Error('User not found');
       }
 
-      const coins = this.rewardConfig.rewardedVideoCoins;
+      const points = this.rewardConfig.adRewardPoints; // Use configurable points per ad
 
-      // Credit coins
-      user.coinBalance += coins;
+      // Credit ONLY reward points (NO COINS)
+      user.rewardPoints = (user.rewardPoints || 0) + points;
       await user.save({ session });
 
       // Create transaction record
@@ -152,12 +151,13 @@ export class AdMobService {
           {
             userId,
             type: TransactionType.AD_REWARD,
-            coins,
+            coins: 0, // No coins given directly from ads
             status: TransactionStatus.COMPLETED,
             meta: {
               adType: 'rewarded_video',
               adUnitId,
               adTransactionId: transactionId || `ad_${Date.now()}`,
+              rewardPoints: points,
               timestamp: new Date(),
             },
           },
@@ -168,16 +168,16 @@ export class AdMobService {
       await session.commitTransaction();
 
       logger.info({
-        msg: 'Rewarded video coins credited',
+        msg: 'Rewarded video points credited',
         userId,
-        coins,
-        newBalance: user.coinBalance,
+        points,
+        newPoints: user.rewardPoints,
       });
 
       return {
         success: true,
-        coins,
-        balance: user.coinBalance,
+        points,
+        rewardPoints: user.rewardPoints,
       };
     } catch (error) {
       await session.abortTransaction();
@@ -316,9 +316,31 @@ export class AdMobService {
     const totalCoins = stats.reduce((sum, stat) => sum + stat.totalCoins, 0);
     const totalAds = stats.reduce((sum, stat) => sum + stat.count, 0);
 
+    // Get hourly stats
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const adsWatchedThisHour = await Transaction.countDocuments({
+      userId,
+      type: TransactionType.AD_REWARD,
+      'meta.adType': 'rewarded_video',
+      createdAt: { $gte: oneHourAgo },
+    });
+
+    // Get daily stats
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const adsWatchedToday = await Transaction.countDocuments({
+      userId,
+      type: TransactionType.AD_REWARD,
+      'meta.adType': 'rewarded_video',
+      createdAt: { $gte: today },
+    });
+
     return {
       totalCoinsEarned: totalCoins,
       totalAdsWatched: totalAds,
+      adsWatchedThisHour,
+      adsWatchedToday,
       byType: stats.map((stat) => ({
         type: stat._id || 'unknown',
         coins: stat.totalCoins,
@@ -330,39 +352,56 @@ export class AdMobService {
 
   /**
    * Check if user can watch ad (rate limiting)
+   * Limit: 3 rewarded videos per hour
    */
   async canWatchAd(userId: string, adType: 'rewarded_video' | 'interstitial'): Promise<{
     canWatch: boolean;
     reason?: string;
     nextAvailableAt?: Date;
+    adsWatchedThisHour?: number;
   }> {
-    // Implement rate limiting
-    // For example: max 10 rewarded videos per day
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Implement hourly rate limiting: 3 rewarded videos per hour
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000); // 1 hour ago
 
-    const todayCount = await Transaction.countDocuments({
+    const hourCount = await Transaction.countDocuments({
       userId,
       type: TransactionType.AD_REWARD,
       'meta.adType': adType,
-      createdAt: { $gte: today },
+      createdAt: { $gte: oneHourAgo },
     });
 
-    const maxPerDay = adType === 'rewarded_video' ? 10 : 50;
+    const maxPerHour = adType === 'rewarded_video' ? 3 : 10; // 3 rewarded videos per hour
 
-    if (todayCount >= maxPerDay) {
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+    if (hourCount >= maxPerHour) {
+      // Calculate when the oldest ad from this hour will expire
+      const oldestAdInHour = await Transaction.findOne({
+        userId,
+        type: TransactionType.AD_REWARD,
+        'meta.adType': adType,
+        createdAt: { $gte: oneHourAgo },
+      })
+        .sort({ createdAt: 1 }) // Get oldest first
+        .lean();
+
+      let nextAvailable = new Date(now.getTime() + 60 * 60 * 1000); // Default: 1 hour from now
+
+      if (oldestAdInHour) {
+        // Next slot will be available 1 hour after the oldest ad
+        nextAvailable = new Date(oldestAdInHour.createdAt.getTime() + 60 * 60 * 1000);
+      }
 
       return {
         canWatch: false,
-        reason: `Daily limit reached (${maxPerDay} ${adType}s per day)`,
-        nextAvailableAt: tomorrow,
+        reason: `Hourly limit reached (${maxPerHour} ${adType}s per hour). Please try again later.`,
+        nextAvailableAt: nextAvailable,
+        adsWatchedThisHour: hourCount,
       };
     }
 
     return {
       canWatch: true,
+      adsWatchedThisHour: hourCount,
     };
   }
 }

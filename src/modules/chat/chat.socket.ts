@@ -31,12 +31,12 @@ export function initializeChatSocket(io: SocketServer) {
       // Find user by Firebase UID
       console.log('🔍 Socket auth: Looking up user by firebaseUid:', firebaseUid);
       const user = await User.findOne({ firebaseUid });
-      
+
       if (!user) {
         // Try to find by phone number as fallback
         const phoneNumber = decodedToken.phone_number;
         console.log('⚠️  User not found by firebaseUid, trying phone:', phoneNumber);
-        
+
         if (phoneNumber) {
           const userByPhone = await User.findOne({ phone: phoneNumber });
           if (userByPhone) {
@@ -48,7 +48,7 @@ export function initializeChatSocket(io: SocketServer) {
             return next();
           }
         }
-        
+
         logger.warn({ msg: 'Socket auth failed: User not found', firebaseUid, phone: phoneNumber });
         return next(new Error('Authentication error'));
       }
@@ -58,13 +58,13 @@ export function initializeChatSocket(io: SocketServer) {
       next();
     } catch (error: any) {
       logger.error({ msg: 'Socket authentication error', error: error.message, code: error.code });
-      
+
       // Check if it's a token expiration error
       if (error.code === 'auth/id-token-expired') {
         logger.warn({ msg: 'Firebase ID token expired during socket authentication' });
         return next(new Error('Firebase ID token expired. Please refresh your token and reconnect.'));
       }
-      
+
       next(new Error('Authentication error'));
     }
   });
@@ -122,7 +122,7 @@ export function initializeChatSocket(io: SocketServer) {
           Chat.findById(roomId).lean(),
           coinService.isFeatureEnabled('chat'),
         ]);
-        
+
         if (!chat) {
           socket.emit('error', { message: 'Chat not found' });
           return;
@@ -137,13 +137,13 @@ export function initializeChatSocket(io: SocketServer) {
           return;
         }
 
-        // Get the other participant (responder)
-        const responderId = chat.participants.find(
+        // Get the other participant (recipient)
+        const recipientId = chat.participants.find(
           (p: any) => p.toString() !== socket.userId
         );
 
-        if (!responderId) {
-          socket.emit('error', { message: 'Responder not found' });
+        if (!recipientId) {
+          socket.emit('error', { message: 'Recipient not found' });
           return;
         }
 
@@ -161,7 +161,7 @@ export function initializeChatSocket(io: SocketServer) {
         try {
           result = await coinService.deductForChat(
             socket.userId,
-            responderId.toString(),
+            recipientId.toString(),
             roomId
           );
         } catch (error: any) {
@@ -213,27 +213,27 @@ export function initializeChatSocket(io: SocketServer) {
         ).exec().catch(err => {
           logger.error(`Failed to update chat lastMessageAt: ${err}`);
         });
-        
+
         // PUSH NOTIFICATION: Send push notification to recipient if they're NOT in the chat room
-        // This ensures they get notified even if app is in background
+        // This ensures they get notified even if app is in background or closed
         // Skip notification if recipient is actively in the room (they'll see message via socket)
         try {
-          const recipientId = responderId.toString();
-          
+          const recipientIdStr = recipientId.toString();
+
           // Check if recipient is in the room (actively viewing chat)
           const recipientSockets = await io.in(roomId).fetchSockets();
-          const isRecipientInRoom = recipientSockets.some((s: any) => s.userId === recipientId);
-          
+          const isRecipientInRoom = recipientSockets.some((s: any) => s.userId === recipientIdStr);
+
           // Only send push notification if recipient is NOT in the room
           if (!isRecipientInRoom) {
             const [recipient, sender] = await Promise.all([
-              User.findById(recipientId).select('fcmToken profile phone').lean(),
+              User.findById(recipientId).select('fcmToken profile phone role').lean(),
               User.findById(socket.userId).select('profile phone').lean(),
             ]);
-            
+
             if (recipient?.fcmToken) {
               const senderName = sender?.profile?.name || sender?.phone || 'Someone';
-              
+
               // Send push notification for new message
               await pushNotificationService.sendNotification(
                 recipient.fcmToken,
@@ -247,10 +247,12 @@ export function initializeChatSocket(io: SocketServer) {
                   messagePreview: body.length > 100 ? body.substring(0, 100) : body,
                 }
               );
-              logger.debug(`Chat notification sent to ${recipientId} (not in room)`);
+              logger.debug(`Chat notification sent to ${recipientIdStr} (not in room)`);
+            } else {
+              logger.debug(`Recipient ${recipientIdStr} has no FCM token - cannot send push notification`);
             }
           } else {
-            logger.debug(`Recipient ${recipientId} is in room - skipping push notification`);
+            logger.debug(`Recipient ${recipientIdStr} is in room - skipping push notification`);
           }
         } catch (notifError) {
           // Non-blocking - don't fail message send if notification fails
@@ -274,7 +276,7 @@ export function initializeChatSocket(io: SocketServer) {
     socket.on('responder_availability_update', async (data) => {
       try {
         logger.info({ msg: 'Responder availability update received', data, socketId: socket.id });
-        
+
         // Broadcast to ALL connected sockets except the sender
         // This ensures all users see the real-time availability change
         socket.broadcast.emit('responder_availability_update', {
@@ -284,7 +286,7 @@ export function initializeChatSocket(io: SocketServer) {
           chatEnabled: data.chatEnabled,
           isOnline: data.audioEnabled || data.videoEnabled || data.chatEnabled,
         });
-        
+
         logger.info({ msg: 'Availability update broadcasted', responderId: data.responderId });
       } catch (error) {
         logger.error({ msg: 'Error broadcasting availability update', error });
@@ -293,29 +295,29 @@ export function initializeChatSocket(io: SocketServer) {
 
     socket.on('disconnect', async () => {
       logger.info(`User ${socket.userId} disconnected from chat (socket: ${socket.id})`);
-      
+
       // AUTO-OFFLINE: Set responders offline when they disconnect
       if (socket.userId) {
         try {
           const user = await User.findById(socket.userId);
-          
+
           if (user && user.role === UserRole.RESPONDER) {
             // Update User model - set offline and reset inCall
             user.isOnline = false;
             user.inCall = false; // Reset inCall in case they were in a call
             user.lastOnlineAt = new Date();
             await user.save();
-            
+
             // Update Responder model - set offline and reset inCall
             await Responder.findOneAndUpdate(
               { userId: socket.userId },
-              { 
+              {
                 isOnline: false,
                 inCall: false, // Reset inCall in case they were in a call
                 lastOnlineAt: new Date()
               }
             );
-            
+
             logger.info(`Auto-offline: Responder ${socket.userId} (${user.profile?.name || user.phone}) set to offline on disconnect`);
           }
         } catch (error) {
