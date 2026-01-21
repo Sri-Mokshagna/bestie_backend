@@ -110,12 +110,46 @@ export function initializeChatSocket(io: SocketServer) {
       logger.info(`User ${socket.userId} left room ${roomId}`);
     });
 
-    socket.on('send_message', async ({ roomId, body }) => {
+    // CRITICAL: Add callback for acknowledgment (confirms to client)
+    socket.on('send_message', async ({ roomId, body }, callback) => {
       try {
+        // CRITICAL: Validate authentication
         if (!socket.userId) {
-          socket.emit('error', { message: 'Not authenticated' });
+          logger.error({ msg: 'Send message: Not authenticated' });
+          if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
           return;
         }
+
+        // CRITICAL: Validate input
+        if (!roomId || !body) {
+          logger.error({
+            msg: 'Send message: Missing required fields',
+            userId: socket.userId,
+            hasRoomId: !!roomId,
+            hasBody: !!body
+          });
+          if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
+          return;
+        }
+
+        // CRITICAL: Validate body is non-empty string
+        if (typeof body !== 'string' || body.trim().length === 0) {
+          logger.error({
+            msg: 'Send message: Invalid message body',
+            userId: socket.userId,
+            bodyType: typeof body,
+            bodyLength: typeof body === 'string' ? body.length : 0
+          });
+          if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
+          return;
+        }
+
+        logger.info({
+          msg: '📤 Processing new message',
+          userId: socket.userId,
+          roomId,
+          messageLength: body.length,
+        });
 
         // PERFORMANCE: Run initial validations in parallel
         const [chat, chatEnabled] = await Promise.all([
@@ -124,7 +158,12 @@ export function initializeChatSocket(io: SocketServer) {
         ]);
 
         if (!chat) {
-          socket.emit('error', { message: 'Chat not found' });
+          logger.error({
+            msg: 'Send message: Chat not found',
+            userId: socket.userId,
+            roomId
+          });
+          if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
           return;
         }
 
@@ -133,7 +172,13 @@ export function initializeChatSocket(io: SocketServer) {
         );
 
         if (!isParticipant) {
-          socket.emit('error', { message: 'Not authorized' });
+          logger.error({
+            msg: 'Send message: User not a participant',
+            userId: socket.userId,
+            roomId,
+            participants: chat.participants.map((p: any) => p.toString()),
+          });
+          if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
           return;
         }
 
@@ -143,36 +188,66 @@ export function initializeChatSocket(io: SocketServer) {
         );
 
         if (!recipientId) {
-          socket.emit('error', { message: 'Recipient not found' });
+          logger.error({ msg: 'Recipient not found', userId: socket.userId, roomId });
+          if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
           return;
         }
 
         // Check if chat is enabled
         if (!chatEnabled) {
-          socket.emit('error', {
-            message: 'Chat feature is currently disabled',
-            code: 'FEATURE_DISABLED',
-          });
+          logger.warn({ msg: 'Chat feature disabled', userId: socket.userId });
+          if (callback) callback({ success: false, error: 'Chat is currently disabled.' });
           return;
         }
 
         // Deduct coins and get config
         let result;
         try {
+          logger.info({
+            msg: 'Attempting coin deduction',
+            userId: socket.userId,
+            recipientId: recipientId.toString(),
+            roomId,
+          });
+
           result = await coinService.deductForChat(
             socket.userId,     // sender
             recipientId.toString(),  // recipient
             roomId
           );
-        } catch (error: any) {
-          if (error.code === 'INSUFFICIENT_COINS') {
-            socket.emit('error', {
-              message: 'No coins left. Please purchase more coins to continue chatting.',
-              code: 'INSUFFICIENT_COINS',
+
+          logger.info({
+            msg: '✅ Coins deducted successfully',
+            balance: result.balance,
+            coinsDeducted: result.coinsDeducted,
+            shouldContinue: result.shouldContinue,
+          });
+
+          if (!result.shouldContinue) {
+            logger.warn({
+              msg: 'Insufficient coins',
+              balance: result.balance,
+              userId: socket.userId,
             });
+            if (callback) callback({ success: false, error: 'Insufficient coins. Please recharge.' });
             return;
           }
-          throw error;
+        } catch (error: any) {
+          logger.error({
+            msg: '❌ Coin deduction error',
+            error: error.message,
+            code: error.code,
+            userId: socket.userId,
+            stack: error.stack,
+          });
+
+          if (error.code === 'INSUFFICIENT_COINS') {
+            if (callback) callback({ success: false, error: 'Insufficient coins. Please recharge.' });
+            return;
+          }
+
+          if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
+          return;
         }
 
         // Create message
@@ -199,6 +274,9 @@ export function initializeChatSocket(io: SocketServer) {
 
         // PERFORMANCE: Emit to room IMMEDIATELY (don't wait for chat.save)
         io.to(roomId).emit('new_message', fastMessage);
+
+        // CRITICAL: Send success acknowledgment to sender
+        if (callback) callback({ success: true, messageId: message._id.toString() });
 
         // Send updated balance to sender immediately
         socket.emit('coin_balance_updated', {
@@ -298,8 +376,15 @@ export function initializeChatSocket(io: SocketServer) {
           `Message sent in room ${roomId} by user ${socket.userId}, coins deducted: ${result.coinsDeducted}`
         );
       } catch (error) {
-        logger.error(`Send message error: ${error}`);
-        socket.emit('error', { message: 'Failed to send message' });
+        logger.error({
+          msg: '❌ Send message error',
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          userId: socket.userId,
+          roomId,
+        });
+
+        if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
       }
     });
 
