@@ -147,8 +147,9 @@ export class CoinService {
         throw new AppError(400, 'Insufficient coins', 'INSUFFICIENT_COINS');
       }
 
-      await User.findByIdAndUpdate(
-        actualUserId,
+      // Update user balance directly (avoid findByIdAndUpdate to prevent transaction conflicts)
+      await User.updateOne(
+        { _id: actualUserId },
         { $inc: { coinBalance: -coinsToDeduct } },
         { session }
       );
@@ -158,7 +159,8 @@ export class CoinService {
         (coinsToDeduct * config.responderCommissionPercentage) / 100
       );
 
-      await Responder.findOneAndUpdate(
+      // Update responder earnings directly (avoid findOneAndUpdate to prevent transaction conflicts)
+      await Responder.updateOne(
         { userId: actualResponderId },
         {
           $inc: {
