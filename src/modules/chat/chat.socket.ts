@@ -221,6 +221,8 @@ export function initializeChatSocket(io: SocketServer) {
           const recipientIdStr = recipientId.toString();
 
           // Check if recipient is in the room (actively viewing chat)
+          // NOTE: When app goes to background, ChatScreen calls leaveRoom() to remove from room
+          // This ensures we send push notifications for background apps
           const recipientSockets = await io.in(roomId).fetchSockets();
           const isRecipientInRoom = recipientSockets.some((s: any) => s.userId === recipientIdStr);
 
@@ -230,6 +232,7 @@ export function initializeChatSocket(io: SocketServer) {
             isRecipientInRoom,
             roomId,
             senderId: socket.userId,
+            socketsInRoom: recipientSockets.length,
           });
 
           // Only send push notification if recipient is NOT in the room
@@ -240,7 +243,7 @@ export function initializeChatSocket(io: SocketServer) {
             ]);
 
             logger.info({
-              msg: 'Attempting to send chat notification',
+              msg: 'Sending chat push notification',
               recipientId: recipientIdStr,
               recipientRole: recipient?.role,
               hasFcmToken: !!recipient?.fcmToken,
@@ -265,7 +268,7 @@ export function initializeChatSocket(io: SocketServer) {
               );
 
               logger.info({
-                msg: 'Chat notification sent',
+                msg: 'Chat notification sent result',
                 recipientId: recipientIdStr,
                 success: notificationResult,
                 recipientRole: recipient.role,
@@ -279,7 +282,7 @@ export function initializeChatSocket(io: SocketServer) {
               });
             }
           } else {
-            logger.debug(`Recipient ${recipientIdStr} is in room - skipping push notification`);
+            logger.debug(`Recipient ${recipientIdStr} is in room (${recipientSockets.length} sockets) - skipping push notification`);
           }
         } catch (notifError) {
           // Non-blocking - don't fail message send if notification fails
