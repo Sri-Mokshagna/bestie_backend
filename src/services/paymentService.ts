@@ -235,26 +235,53 @@ export class PaymentService {
         {
           userId: payment.userId,
           orderId: payment.orderId,
-          coins: payment.coins
+          amountPaid: payment.amount,
         },
-        '💰 Status saved, now crediting coins'
+        '💰 Status saved, now calculating coins to credit'
       );
 
-      // Now credit coins
+      // Get config to calculate coins based on coinsToINRRate
+      const config = await coinService.getConfig();
+
+      // IMPORTANT: Calculate actual coins based on amount paid and admin's rate
+      // This respects the admin's coinsToINRRate setting
+      // Example: ₹100 paid with rate 0.1 (₹0.1 per coin) = 1000 coins
+      const coinsToCredit = Math.floor(payment.amount / config.coinsToINRRate);
+
+      logger.info(
+        {
+          userId: payment.userId,
+          orderId: payment.orderId,
+          amountPaid: payment.amount,
+          coinsToINRRate: config.coinsToINRRate,
+          originalPlanCoins: payment.coins,
+          calculatedCoins: coinsToCredit,
+          calculation: `${payment.amount} / ${config.coinsToINRRate} = ${coinsToCredit}`,
+        },
+        '🔢 Coins calculated based on coinsToINRRate (admin setting)'
+      );
+
+      // Credit the calculated coins (not the plan's fixed coins)
       await coinService.creditCoins(
         payment.userId.toString(),
-        payment.coins,
+        coinsToCredit, // Use calculated coins based on rate
         TransactionType.PURCHASE,
-        { orderId: payment.orderId, description: `Coin purchase - Order ${payment.orderId}` }
+        {
+          orderId: payment.orderId,
+          description: `Coin purchase - Order ${payment.orderId}`,
+          amountPaid: payment.amount,
+          coinsToINRRate: config.coinsToINRRate,
+          calculatedCoins: coinsToCredit,
+        }
       );
 
       logger.info(
         {
           userId: payment.userId,
           orderId: payment.orderId,
-          coins: payment.coins
+          coinsCredited: coinsToCredit,
         },
-        '✅ Coins credited successfully'
+        '✅ Coins credited successfully (calculated amount)'
       );
     } catch (error) {
       logger.error({ error, orderId: payment.orderId }, 'Failed to process successful payment');

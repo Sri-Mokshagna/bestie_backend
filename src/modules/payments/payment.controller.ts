@@ -3,12 +3,46 @@ import { paymentService } from '../../services/paymentService';
 import { CoinPlan } from '../../models/CoinPlan';
 import { logger } from '../../lib/logger';
 import { AppError } from '../../middleware/errorHandler';
+import { coinService } from '../../services/coinService';
 
 export class PaymentController {
   async getPlans(req: Request, res: Response) {
     try {
       const plans = await CoinPlan.find({ isActive: true }).sort({ priceINR: 1 });
-      res.json({ plans });
+
+      // Get coin config to calculate actual coins based on coinsToINRRate
+      const config = await coinService.getConfig();
+
+      // Transform plans to show correct coins based on admin's coinsToINRRate setting
+      // Example: If rate is 0.1 (₹0.1 per coin) and price is ₹100, user gets 1000 coins
+      const transformedPlans = plans.map(plan => {
+        const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
+
+        return {
+          _id: plan._id,
+          name: plan.name,
+          priceINR: plan.priceINR,
+          coins: calculatedCoins, // Calculated based on rate, not fixed value
+          discount: plan.discount,
+          tags: plan.tags,
+          isActive: plan.isActive,
+          maxUses: plan.maxUses,
+          // Metadata for debugging
+          _meta: {
+            originalCoins: plan.coins,
+            coinsToINRRate: config.coinsToINRRate,
+            calculation: `${plan.priceINR} / ${config.coinsToINRRate} = ${calculatedCoins}`,
+          },
+        };
+      });
+
+      logger.info({
+        plansCount: plans.length,
+        coinsToINRRate: config.coinsToINRRate,
+        sample: transformedPlans[0]?._meta,
+      }, 'Coin plans calculated with dynamic rate');
+
+      res.json({ plans: transformedPlans });
     } catch (error) {
       logger.error({ error }, 'Failed to get coin plans');
       throw error;
