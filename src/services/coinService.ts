@@ -45,7 +45,7 @@ export class CoinService {
         audioCallCoinsPerMinute: 10,
         videoCallCoinsPerMinute: 60,
         initialUserCoins: 10,
-        responderMinRedeemCoins: 100,
+        responderMinRedeemCoins: 5,
         responderCommissionPercentage: 70,
         coinsToINRRate: 1,
         chatEnabled: true,

@@ -13,7 +13,7 @@ import { logger } from '../../lib/logger';
 
 export const getCoinConfig = asyncHandler(async (req: AuthRequest, res: Response) => {
   const config = await coinService.getConfig();
-  
+
   res.json({
     config: {
       id: config._id,
@@ -83,7 +83,7 @@ export const updateCoinConfig = asyncHandler(async (req: AuthRequest, res: Respo
       audioCallCoinsPerMinute: audioCallCoinsPerMinute ?? 10,
       videoCallCoinsPerMinute: videoCallCoinsPerMinute ?? 60,
       initialUserCoins: initialUserCoins ?? 10,
-      responderMinRedeemCoins: responderMinRedeemCoins ?? 100,
+      responderMinRedeemCoins: responderMinRedeemCoins ?? 5,
       responderCommissionPercentage: responderCommissionPercentage ?? 70,
       coinsToINRRate: coinsToINRRate ?? 1,
       chatEnabled: chatEnabled ?? true,
@@ -135,21 +135,21 @@ export const updateCoinConfig = asyncHandler(async (req: AuthRequest, res: Respo
 // Get all coin plans (for admin)
 export const getCoinPlans = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { includeInactive } = req.query;
-  
+
   const query = includeInactive === 'true' ? {} : { isActive: true };
   const plans = await CoinPlan.find(query).sort({ priceINR: 1 }).lean();
-  
+
   res.json({ plans });
 });
 
 // Create new coin plan
 export const createCoinPlan = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { name, priceINR, coins, tags, maxUses, discount, isActive } = req.body;
-  
+
   if (!name || priceINR === undefined || coins === undefined) {
     throw new AppError(400, 'Name, priceINR, and coins are required');
   }
-  
+
   // Validate tags
   if (tags) {
     const validTags = Object.values(PlanTag);
@@ -159,7 +159,7 @@ export const createCoinPlan = asyncHandler(async (req: AuthRequest, res: Respons
       }
     }
   }
-  
+
   const plan = await CoinPlan.create({
     name,
     priceINR,
@@ -169,9 +169,9 @@ export const createCoinPlan = asyncHandler(async (req: AuthRequest, res: Respons
     discount,
     isActive: isActive !== false,
   });
-  
+
   logger.info({ adminId: req.user?.id, planId: plan._id }, 'Coin plan created');
-  
+
   res.status(201).json({ message: 'Coin plan created', plan });
 });
 
@@ -179,12 +179,12 @@ export const createCoinPlan = asyncHandler(async (req: AuthRequest, res: Respons
 export const updateCoinPlan = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { planId } = req.params;
   const { name, priceINR, coins, tags, maxUses, discount, isActive } = req.body;
-  
+
   const plan = await CoinPlan.findById(planId);
   if (!plan) {
     throw new AppError(404, 'Coin plan not found');
   }
-  
+
   // Update fields if provided
   if (name !== undefined) plan.name = name;
   if (priceINR !== undefined) plan.priceINR = priceINR;
@@ -193,29 +193,29 @@ export const updateCoinPlan = asyncHandler(async (req: AuthRequest, res: Respons
   if (maxUses !== undefined) plan.maxUses = maxUses;
   if (discount !== undefined) plan.discount = discount;
   if (isActive !== undefined) plan.isActive = isActive;
-  
+
   await plan.save();
-  
+
   logger.info({ adminId: req.user?.id, planId: plan._id }, 'Coin plan updated');
-  
+
   res.json({ message: 'Coin plan updated', plan });
 });
 
 // Delete coin plan (soft delete - just deactivate)
 export const deleteCoinPlan = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { planId } = req.params;
-  
+
   const plan = await CoinPlan.findByIdAndUpdate(
     planId,
     { isActive: false },
     { new: true }
   );
-  
+
   if (!plan) {
     throw new AppError(404, 'Coin plan not found');
   }
-  
+
   logger.info({ adminId: req.user?.id, planId: plan._id }, 'Coin plan deactivated');
-  
+
   res.json({ message: 'Coin plan deactivated', plan });
 });
