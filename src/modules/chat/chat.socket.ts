@@ -160,8 +160,8 @@ export function initializeChatSocket(io: SocketServer) {
         let result;
         try {
           result = await coinService.deductForChat(
-            socket.userId,
-            recipientId.toString(),
+            socket.userId,     // sender
+            recipientId.toString(),  // recipient
             roomId
           );
         } catch (error: any) {
@@ -224,18 +224,34 @@ export function initializeChatSocket(io: SocketServer) {
           const recipientSockets = await io.in(roomId).fetchSockets();
           const isRecipientInRoom = recipientSockets.some((s: any) => s.userId === recipientIdStr);
 
+          logger.info({
+            msg: 'Chat notification check',
+            recipientId: recipientIdStr,
+            isRecipientInRoom,
+            roomId,
+            senderId: socket.userId,
+          });
+
           // Only send push notification if recipient is NOT in the room
           if (!isRecipientInRoom) {
             const [recipient, sender] = await Promise.all([
               User.findById(recipientId).select('fcmToken profile phone role').lean(),
-              User.findById(socket.userId).select('profile phone').lean(),
+              User.findById(socket.userId).select('profile phone role').lean(),
             ]);
+
+            logger.info({
+              msg: 'Attempting to send chat notification',
+              recipientId: recipientIdStr,
+              recipientRole: recipient?.role,
+              hasFcmToken: !!recipient?.fcmToken,
+              senderRole: sender?.role,
+            });
 
             if (recipient?.fcmToken) {
               const senderName = sender?.profile?.name || sender?.phone || 'Someone';
 
               // Send push notification for new message
-              await pushNotificationService.sendNotification(
+              const notificationResult = await pushNotificationService.sendNotification(
                 recipient.fcmToken,
                 'New Message',
                 `${senderName}: ${body.length > 50 ? body.substring(0, 50) + '...' : body}`,
@@ -247,16 +263,32 @@ export function initializeChatSocket(io: SocketServer) {
                   messagePreview: body.length > 100 ? body.substring(0, 100) : body,
                 }
               );
-              logger.debug(`Chat notification sent to ${recipientIdStr} (not in room)`);
+
+              logger.info({
+                msg: 'Chat notification sent',
+                recipientId: recipientIdStr,
+                success: notificationResult,
+                recipientRole: recipient.role,
+              });
             } else {
-              logger.debug(`Recipient ${recipientIdStr} has no FCM token - cannot send push notification`);
+              logger.warn({
+                msg: 'Cannot send chat notification - no FCM token',
+                recipientId: recipientIdStr,
+                recipientRole: recipient?.role,
+                recipientExists: !!recipient,
+              });
             }
           } else {
             logger.debug(`Recipient ${recipientIdStr} is in room - skipping push notification`);
           }
         } catch (notifError) {
           // Non-blocking - don't fail message send if notification fails
-          logger.warn({ msg: 'Failed to send chat notification', error: notifError });
+          logger.error({
+            msg: 'Failed to send chat notification',
+            error: notifError,
+            recipientId: recipientId.toString(),
+            stack: (notifError as Error).stack,
+          });
         }
 
         logger.info(

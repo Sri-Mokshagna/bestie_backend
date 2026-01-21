@@ -93,10 +93,11 @@ export class CoinService {
   /**
    * Deduct coins from user for chat message
    * Returns updated balance
+   * NOTE: Only users are charged for chat messages, not responders
    */
   async deductForChat(
-    userId: string,
-    responderId: string,
+    senderId: string,
+    recipientId: string,
     chatId: string
   ): Promise<{ balance: number; coinsDeducted: number }> {
     const config = await this.getConfig();
@@ -110,8 +111,36 @@ export class CoinService {
     session.startTransaction();
 
     try {
-      // Check and deduct from user
-      const user = await User.findById(userId).session(session);
+      // Determine who is the user and who is the responder
+      const [sender, recipient] = await Promise.all([
+        User.findById(senderId).select('role coinBalance').session(session),
+        User.findById(recipientId).select('role').session(session),
+      ]);
+
+      if (!sender) {
+        throw new AppError(404, 'Sender not found');
+      }
+      if (!recipient) {
+        throw new AppError(404, 'Recipient not found');
+      }
+
+      let actualUserId: string;
+      let actualResponderId: string;
+
+      // Identify who is the user (the one to be charged)
+      if (sender.role === 'user') {
+        actualUserId = senderId;
+        actualResponderId = recipientId;
+      } else if (sender.role === 'responder') {
+        // If responder is sending, the USER (recipient) should be charged
+        actualUserId = recipientId;
+        actualResponderId = senderId;
+      } else {
+        throw new AppError(400, 'Invalid sender role');
+      }
+
+      // Check and deduct from USER (not sender if sender is responder)
+      const user = await User.findById(actualUserId).session(session);
       if (!user) {
         throw new AppError(404, 'User not found');
       }
@@ -121,7 +150,7 @@ export class CoinService {
       }
 
       await User.findByIdAndUpdate(
-        userId,
+        actualUserId,
         { $inc: { coinBalance: -coinsToDeduct } },
         { session }
       );
@@ -132,7 +161,7 @@ export class CoinService {
       );
 
       await Responder.findOneAndUpdate(
-        { userId: responderId },
+        { userId: actualResponderId },
         {
           $inc: {
             'earnings.totalCoins': responderCoins,
@@ -146,12 +175,12 @@ export class CoinService {
       await Transaction.create(
         [
           {
-            userId,
-            responderId,
+            userId: actualUserId,
+            responderId: actualResponderId,
             type: TransactionType.CHAT,
             coins: -coinsToDeduct,
             status: TransactionStatus.COMPLETED,
-            meta: { chatId, responderEarned: responderCoins },
+            meta: { chatId, responderEarned: responderCoins, senderId },
           },
         ],
         { session }
@@ -161,8 +190,10 @@ export class CoinService {
 
       logger.info({
         msg: 'Chat coins deducted',
-        userId,
-        responderId,
+        senderId,
+        recipientId,
+        actualUserId,
+        actualResponderId,
         coins: coinsToDeduct,
         newBalance: user.coinBalance - coinsToDeduct,
       });
