@@ -2,12 +2,13 @@ import { Request, Response } from 'express';
 import { CommissionConfig } from '../../models/CommissionConfig';
 import { logger } from '../../lib/logger';
 import { AppError } from '../../middleware/errorHandler';
+import { commissionService } from '../../services/commissionService';
 
 export class CommissionController {
   async getCommissionConfig(req: Request, res: Response) {
     try {
       let config = await CommissionConfig.findOne({ isActive: true });
-      
+
       // Create default config if none exists
       if (!config) {
         config = await CommissionConfig.create({
@@ -69,8 +70,8 @@ export class CommissionController {
       });
 
       logger.info(
-        { 
-          adminId: req.user!.id, 
+        {
+          adminId: req.user!.id,
           newConfig: {
             responderCommissionPercentage,
             adminCommissionPercentage,
@@ -80,6 +81,10 @@ export class CommissionController {
         },
         'Commission config updated'
       );
+
+      // CRITICAL: Clear commission cache so new settings apply immediately
+      commissionService.clearConfigCache();
+      logger.info({ adminId: req.user!.id }, 'Commission cache cleared - new settings will apply to next transaction');
 
       res.json({
         success: true,

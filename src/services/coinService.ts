@@ -173,7 +173,8 @@ export class CoinService {
       // Credit responder
       // IMPORTANT: Use centralized commission service for consistency with calls
       const responderPercentage = await commissionService.getResponderPercentage();
-      const responderCoins = Math.floor(
+      // Use Math.round() for fair distribution with small amounts
+      const responderCoins = Math.round(
         (coinsToDeduct * responderPercentage) / 100
       );
 
@@ -286,7 +287,8 @@ export class CoinService {
       // Credit responder
       // IMPORTANT: Use centralized commission service for consistency
       const responderPercentage = await commissionService.getResponderPercentage();
-      const responderCoins = Math.floor(
+      // Use Math.round() for fair distribution with small amounts
+      const responderCoins = Math.round(
         (coinsToDeduct * responderPercentage) / 100
       );
 

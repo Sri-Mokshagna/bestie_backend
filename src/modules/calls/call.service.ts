@@ -68,7 +68,7 @@ export const callService = {
     // Check if responder is online - consider both isOnline AND availability flags
     const hasAnyAvailabilityEnabled = responderUser.audioEnabled || responderUser.videoEnabled || responderUser.chatEnabled;
     const effectivelyOnline = responderUser.isOnline || hasAnyAvailabilityEnabled;
-    
+
     if (!effectivelyOnline) {
       throw new AppError(400, 'Responder is currently offline', 'RESPONDER_OFFLINE');
     }
@@ -370,7 +370,9 @@ export const callService = {
       const responderPercentage = await commissionService.getResponderPercentage();
 
       // Calculate responder earnings
-      const responderCoins = Math.floor(actualDeduction * (responderPercentage / 100));
+      // Use Math.round() instead of Math.floor() for fairer distribution with small amounts
+      // Example: 2 coins × 30% = 0.6 → rounds to 1 coin (instead of 0)
+      const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
 
       // Credit responder
       let responder = await Responder.findOne({ userId: call.responderId });
@@ -666,7 +668,7 @@ export const callService = {
     return calls.map(call => {
       const userIdStr = call.userId.toString();
       const responderIdStr = call.responderId.toString();
-      
+
       const userDoc = userMap.get(userIdStr);
       const responderDoc = userMap.get(responderIdStr);
 
@@ -741,7 +743,7 @@ export const callService = {
       call.endTime = now;
       await call.save();
       await this.createCallMessage(call);
-      
+
       // Reset inCall flag for responder
       await User.findByIdAndUpdate(call.responderId, { inCall: false });
       await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
@@ -758,7 +760,7 @@ export const callService = {
       call.status = CallStatus.ENDED;
       call.endTime = now;
       await call.save();
-      
+
       // Reset inCall flag for responder
       await User.findByIdAndUpdate(call.responderId, { inCall: false });
       await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
