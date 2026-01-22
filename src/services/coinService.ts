@@ -5,6 +5,7 @@ import { Transaction, TransactionType, TransactionStatus } from '../models/Trans
 import { AppError } from '../middleware/errorHandler';
 import { mongoose } from '../lib/db';
 import { logger } from '../lib/logger';
+import { commissionService } from './commissionService';
 
 /**
  * Centralized Coin Service
@@ -147,16 +148,33 @@ export class CoinService {
         throw new AppError(400, 'Insufficient coins', 'INSUFFICIENT_COINS');
       }
 
-      // Update user balance directly (avoid findByIdAndUpdate to prevent transaction conflicts)
-      await User.updateOne(
-        { _id: actualUserId },
+      // CRITICAL: Use atomic update with balance check to prevent race conditions
+      // This ensures the balance never goes negative even with concurrent requests
+      const updateResult = await User.updateOne(
+        {
+          _id: actualUserId,
+          coinBalance: { $gte: coinsToDeduct } // Only update if balance is sufficient
+        },
         { $inc: { coinBalance: -coinsToDeduct } },
         { session }
       );
 
+      // Double-check that the update succeeded (balance was sufficient at transaction time)
+      if (updateResult.modifiedCount === 0) {
+        logger.error({
+          msg: 'Race condition detected: Balance insufficient during transaction',
+          userId: actualUserId,
+          userBalance: user.coinBalance,
+          coinsToDeduct,
+        });
+        throw new AppError(400, 'Insufficient coins', 'INSUFFICIENT_COINS');
+      }
+
       // Credit responder
+      // IMPORTANT: Use centralized commission service for consistency with calls
+      const responderPercentage = await commissionService.getResponderPercentage();
       const responderCoins = Math.floor(
-        (coinsToDeduct * config.responderCommissionPercentage) / 100
+        (coinsToDeduct * responderPercentage) / 100
       );
 
       // Update responder earnings directly (avoid findOneAndUpdate to prevent transaction conflicts)
@@ -266,8 +284,10 @@ export class CoinService {
       );
 
       // Credit responder
+      // IMPORTANT: Use centralized commission service for consistency
+      const responderPercentage = await commissionService.getResponderPercentage();
       const responderCoins = Math.floor(
-        (coinsToDeduct * config.responderCommissionPercentage) / 100
+        (coinsToDeduct * responderPercentage) / 100
       );
 
       await Responder.findOneAndUpdate(

@@ -220,18 +220,10 @@ export function initializeChatSocket(io: SocketServer) {
             msg: '✅ Coins deducted successfully',
             balance: result.balance,
             coinsDeducted: result.coinsDeducted,
-            shouldContinue: result.shouldContinue,
           });
 
-          if (!result.shouldContinue) {
-            logger.warn({
-              msg: 'Insufficient coins',
-              balance: result.balance,
-              userId: socket.userId,
-            });
-            if (callback) callback({ success: false, error: 'Insufficient coins. Please recharge.' });
-            return;
-          }
+          // NOTE: deductForChat throws error if insufficient coins,
+          // so if we reach here, deduction was successful
         } catch (error: any) {
           logger.error({
             msg: '❌ Coin deduction error',
