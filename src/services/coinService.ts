@@ -101,7 +101,12 @@ export class CoinService {
     recipientId: string,
     chatId: string
   ): Promise<{ balance: number; coinsDeducted: number }> {
-    const config = await this.getConfig();
+    // CRITICAL: Get config and commission BEFORE starting transaction
+    // This prevents transaction conflicts that cause 5-second delays
+    const [config, responderPercentage] = await Promise.all([
+      this.getConfig(),
+      commissionService.getResponderPercentage(),
+    ]);
 
     if (!config.chatEnabled) {
       throw new AppError(403, 'Chat feature is currently disabled');
@@ -171,8 +176,7 @@ export class CoinService {
       }
 
       // Credit responder
-      // IMPORTANT: Use centralized commission service for consistency with calls
-      const responderPercentage = await commissionService.getResponderPercentage();
+      // Commission percentage already fetched BEFORE transaction
       // Use Math.round() for fair distribution with small amounts
       const responderCoins = Math.round(
         (coinsToDeduct * responderPercentage) / 100
@@ -240,7 +244,11 @@ export class CoinService {
     callType: 'audio' | 'video',
     durationSeconds: number
   ): Promise<{ balance: number; coinsDeducted: number; shouldContinue: boolean }> {
-    const config = await this.getConfig();
+    // CRITICAL: Get config and commission BEFORE starting transaction
+    const [config, responderPercentage] = await Promise.all([
+      this.getConfig(),
+      commissionService.getResponderPercentage(),
+    ]);
 
     // Check if call type is enabled
     if (callType === 'audio' && !config.audioCallEnabled) {
@@ -285,8 +293,7 @@ export class CoinService {
       );
 
       // Credit responder
-      // IMPORTANT: Use centralized commission service for consistency
-      const responderPercentage = await commissionService.getResponderPercentage();
+      // Commission percentage already fetched BEFORE transaction
       // Use Math.round() for fair distribution with small amounts
       const responderCoins = Math.round(
         (coinsToDeduct * responderPercentage) / 100
