@@ -208,6 +208,7 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
 /**
  * Admin endpoint to process payout
  * Integrates with Cashfree Payout API for UPI transfers
+ * Includes retry logic for MongoDB write conflicts
  */
 export const processPayout = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { payoutId } = req.params;
@@ -234,150 +235,187 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
     throw new AppError(400, 'Payout is not in pending or processing state');
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  // Retry logic for MongoDB write conflicts
+  const MAX_RETRIES = 3;
+  let lastError: any = null;
 
-  try {
-    if (status === 'completed') {
-      // Update status to processing
-      payout.status = PayoutStatus.PROCESSING;
-      await payout.save({ session });
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-      // Get responder details
-      const responder: any = payout.responderId;
-      const user: any = responder.userId;
-
-      // Create beneficiary ID (unique per responder)
-      const beneId = `BENE_${responder._id}`;
-      const transferId = `TRANSFER_${Date.now()}_${payout._id.toString().slice(-8)}`;
-
-      try {
-        logger.info({
-          payoutId,
-          beneId,
-          transferId,
-          amount: payout.amountINR,
-          upiId: payout.upiId,
-          responderName: user.profile?.name,
-          responderPhone: user.phone,
-          responderEmail: user.email,
-        }, '💸 Processing payout via Cashfree - FULL DETAILS');
-
-        // Step 0: Check payout balance first
-        try {
-          const balance = await cashfreeService.getPayoutBalance();
-          logger.info({
-            currentBalance: balance.data?.balance,
-            payoutAmount: payout.amountINR,
-            sufficientFunds: (balance.data?.balance || 0) >= payout.amountINR,
-          }, '💰 Payout account balance check');
-
-          if ((balance.data?.balance || 0) < payout.amountINR) {
-            throw new Error(`Insufficient payout balance. Available: ₹${balance.data?.balance}, Required: ₹${payout.amountINR}`);
-          }
-        } catch (balanceError: any) {
-          logger.error({
-            error: balanceError.message,
-            response: balanceError.response?.data,
-          }, '❌ Failed to check payout balance - continuing anyway');
-          // Continue anyway - the requestPayout will fail if insufficient
-        }
-
-        // Step 1: Create/Register beneficiary with Cashfree
-        logger.info({
-          beneId,
-          name: user.profile?.name || 'Responder',
-          upiId: payout.upiId,
-        }, '👤 Creating/verifying beneficiary');
-
-        await cashfreeService.createBeneficiary({
-          beneId,
-          name: user.profile?.name || 'Responder',
-          email: user.email || `responder_${responder._id}@bestie.app`,
-          phone: user.phone || '9999999999',
-          vpa: payout.upiId,
-        });
-
-        logger.info({ beneId }, '✅ Beneficiary created/verified successfully');
-
-        // Step 2: Request payout transfer
-        logger.info({
-          transferId,
-          beneId,
-          amount: payout.amountINR,
-          transferMode: 'upi',
-          upiId: payout.upiId,
-        }, '💸 REQUESTING PAYOUT TRANSFER - This is the critical step');
-
-        const payoutResponse = await cashfreeService.requestPayout({
-          transferId,
-          beneId,
-          amount: payout.amountINR,
-          transferMode: 'upi',
-          remarks: `Bestie payout - ${payout.coins} coins`,
-        });
-
-        logger.info({
-          transferId,
-          cashfreeResponse: payoutResponse,
-          responseKeys: Object.keys(payoutResponse || {}),
-          referenceId: payoutResponse?.referenceId,
-          status: payoutResponse?.status,
-        }, '✅ PAYOUT TRANSFER REQUEST RESPONSE - Full details');
-
-        // Step 3: Update payout with gateway response
-        payout.status = PayoutStatus.COMPLETED;
-        payout.completedAt = new Date();
-        payout.gatewayResponse = {
-          status: 'SUCCESS',
-          transferId,
-          beneId,
-          amount: payout.amountINR,
-          upiId: payout.upiId,
-          requestedAt: new Date().toISOString(),
-          cashfreeResponse: payoutResponse, // Full Cashfree response for debugging
-          referenceId: payoutResponse?.referenceId,
-          transferStatus: payoutResponse?.status,
-        };
+    try {
+      if (status === 'completed') {
+        // Update status to processing
+        payout.status = PayoutStatus.PROCESSING;
         await payout.save({ session });
 
-        await session.commitTransaction();
-        session.endSession();
+        // Get responder details
+        const responder: any = payout.responderId;
+        const user: any = responder.userId;
 
-        logger.info({
-          payoutId,
-          transferId,
-          amount: payout.amountINR,
-          status: 'COMPLETED',
-        }, '✅ Payout processed successfully');
+        // Create beneficiary ID (unique per responder)
+        const beneId = `BENE_${responder._id}`;
+        const transferId = `TRANSFER_${Date.now()}_${payout._id.toString().slice(-8)}`;
 
-        res.json({
-          message: 'Payout processed successfully',
-          payout: {
-            id: payout._id,
-            coins: payout.coins,
-            amountINR: payout.amountINR,
-            upiId: payout.upiId,
-            status: payout.status,
-            completedAt: payout.completedAt,
+        try {
+          logger.info({
+            payoutId,
+            beneId,
             transferId,
-          },
-        });
-        return;
-      } catch (cashfreeError: any) {
-        // If Cashfree API fails, mark payout as failed and revert coins
-        logger.error({
-          error: cashfreeError.response?.data || cashfreeError.message,
-          payoutId,
-          beneId,
-          transferId,
-        }, '❌ Cashfree payout failed');
+            amount: payout.amountINR,
+            upiId: payout.upiId,
+            responderName: user.profile?.name,
+            responderPhone: user.phone,
+            responderEmail: user.email,
+          }, '💸 Processing payout via Cashfree - FULL DETAILS');
 
-        payout.status = PayoutStatus.FAILED;
-        payout.gatewayResponse = {
-          error: cashfreeError.response?.data || cashfreeError.message,
-          timestamp: new Date().toISOString(),
-        };
+          // Step 0: Check payout balance first
+          try {
+            const balance = await cashfreeService.getPayoutBalance();
+            logger.info({
+              currentBalance: balance.data?.balance,
+              payoutAmount: payout.amountINR,
+              sufficientFunds: (balance.data?.balance || 0) >= payout.amountINR,
+            }, '💰 Payout account balance check');
+
+            if ((balance.data?.balance || 0) < payout.amountINR) {
+              throw new Error(`Insufficient payout balance. Available: ₹${balance.data?.balance}, Required: ₹${payout.amountINR}`);
+            }
+          } catch (balanceError: any) {
+            logger.error({
+              error: balanceError.message,
+              response: balanceError.response?.data,
+            }, '❌ Failed to check payout balance - continuing anyway');
+            // Continue anyway - the requestPayout will fail if insufficient
+          }
+
+          // Step 1: Create/Register beneficiary with Cashfree
+          logger.info({
+            beneId,
+            name: user.profile?.name || 'Responder',
+            upiId: payout.upiId,
+          }, '👤 Creating/verifying beneficiary');
+
+          await cashfreeService.createBeneficiary({
+            beneId,
+            name: user.profile?.name || 'Responder',
+            email: user.email || `responder_${responder._id}@bestie.app`,
+            phone: user.phone || '9999999999',
+            vpa: payout.upiId,
+          });
+
+          logger.info({ beneId }, '✅ Beneficiary created/verified successfully');
+
+          // Step 2: Request payout transfer
+          logger.info({
+            transferId,
+            beneId,
+            amount: payout.amountINR,
+            transferMode: 'upi',
+            upiId: payout.upiId,
+          }, '💸 REQUESTING PAYOUT TRANSFER - This is the critical step');
+
+          const payoutResponse = await cashfreeService.requestPayout({
+            transferId,
+            beneId,
+            amount: payout.amountINR,
+            transferMode: 'upi',
+            remarks: `Bestie payout - ${payout.coins} coins`,
+          });
+
+          logger.info({
+            transferId,
+            cashfreeResponse: payoutResponse,
+            responseKeys: Object.keys(payoutResponse || {}),
+            referenceId: payoutResponse?.referenceId,
+            status: payoutResponse?.status,
+          }, '✅ PAYOUT TRANSFER REQUEST RESPONSE - Full details');
+
+          // Step 3: Update payout with gateway response
+          payout.status = PayoutStatus.COMPLETED;
+          payout.completedAt = new Date();
+          payout.gatewayResponse = {
+            status: 'SUCCESS',
+            transferId,
+            beneId,
+            amount: payout.amountINR,
+            upiId: payout.upiId,
+            requestedAt: new Date().toISOString(),
+            cashfreeResponse: payoutResponse, // Full Cashfree response for debugging
+            referenceId: payoutResponse?.referenceId,
+            transferStatus: payoutResponse?.status,
+          };
+          await payout.save({ session });
+
+          await session.commitTransaction();
+          session.endSession();
+
+          logger.info({
+            payoutId,
+            transferId,
+            amount: payout.amountINR,
+            status: 'COMPLETED',
+          }, '✅ Payout processed successfully');
+
+          res.json({
+            message: 'Payout processed successfully',
+            payout: {
+              id: payout._id,
+              coins: payout.coins,
+              amountINR: payout.amountINR,
+              upiId: payout.upiId,
+              status: payout.status,
+              completedAt: payout.completedAt,
+              transferId,
+            },
+          });
+          return;
+        } catch (cashfreeError: any) {
+          // If Cashfree API fails, mark payout as failed and revert coins
+          logger.error({
+            error: cashfreeError.response?.data || cashfreeError.message,
+            payoutId,
+            beneId,
+            transferId,
+          }, '❌ Cashfree payout failed');
+
+          payout.status = PayoutStatus.FAILED;
+          payout.gatewayResponse = {
+            error: cashfreeError.response?.data || cashfreeError.message,
+            timestamp: new Date().toISOString(),
+          };
+          await payout.save({ session });
+
+          // Move coins back to pending
+          await Responder.findByIdAndUpdate(
+            payout.responderId,
+            {
+              $inc: {
+                'earnings.pendingCoins': payout.coins,
+                'earnings.redeemedCoins': -payout.coins,
+              },
+            },
+            { session }
+          );
+
+          await session.commitTransaction();
+          session.endSession();
+
+          // Return error response instead of throwing (transaction already committed)
+          res.status(500).json({
+            error: `Payout failed: ${cashfreeError.response?.data?.message || cashfreeError.message}`,
+            payout: {
+              id: payout._id,
+              status: payout.status,
+            },
+          });
+          return;
+        }
+      } else if (status === 'rejected') {
+        // Payout rejected, revert coins
+        payout.status = PayoutStatus.REJECTED;
+        payout.rejectedAt = new Date();
+        payout.rejectionReason = rejectionReason || 'Rejected by admin';
         await payout.save({ session });
 
         // Move coins back to pending
@@ -395,61 +433,63 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
         await session.commitTransaction();
         session.endSession();
 
-        // Return error response instead of throwing (transaction already committed)
-        res.status(500).json({
-          error: `Payout failed: ${cashfreeError.response?.data?.message || cashfreeError.message}`,
+        logger.info({
+          payoutId,
+          reason: rejectionReason,
+        }, '🚫 Payout rejected');
+
+        res.json({
+          message: 'Payout rejected successfully',
           payout: {
             id: payout._id,
+            coins: payout.coins,
+            amountINR: payout.amountINR,
+            upiId: payout.upiId,
             status: payout.status,
+            rejectionReason: payout.rejectionReason,
+            rejectedAt: payout.rejectedAt,
           },
         });
         return;
       }
-    } else if (status === 'rejected') {
-      // Payout rejected, revert coins
-      payout.status = PayoutStatus.REJECTED;
-      payout.rejectedAt = new Date();
-      payout.rejectionReason = rejectionReason || 'Rejected by admin';
-      await payout.save({ session });
-
-      // Move coins back to pending
-      await Responder.findByIdAndUpdate(
-        payout.responderId,
-        {
-          $inc: {
-            'earnings.pendingCoins': payout.coins,
-            'earnings.redeemedCoins': -payout.coins,
-          },
-        },
-        { session }
-      );
-
-      await session.commitTransaction();
+    } catch (error: any) {
+      await session.abortTransaction();
       session.endSession();
 
-      logger.info({
-        payoutId,
-        reason: rejectionReason,
-      }, '🚫 Payout rejected');
+      // Check if this is a MongoDB write conflict that we should retry
+      const isWriteConflict = error.message?.includes('Write conflict') ||
+        error.code === 112; // WriteConflict error code
 
-      res.json({
-        message: 'Payout rejected successfully',
-        payout: {
-          id: payout._id,
-          coins: payout.coins,
-          amountINR: payout.amountINR,
-          upiId: payout.upiId,
-          status: payout.status,
-          rejectionReason: payout.rejectionReason,
-          rejectedAt: payout.rejectedAt,
-        },
-      });
-      return;
+      if (isWriteConflict && attempt < MAX_RETRIES - 1) {
+        // Store error and retry after a delay
+        lastError = error;
+        const delayMs = Math.pow(2, attempt) * 100; // Exponential backoff: 100ms, 200ms, 400ms
+
+        logger.warn({
+          attempt: attempt + 1,
+          maxRetries: MAX_RETRIES,
+          delayMs,
+          payoutId,
+          error: error.message,
+        }, '⚠️ MongoDB write conflict - retrying payout processing');
+
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        continue; // Retry the transaction
+      }
+
+      // If not a write conflict or we've exhausted retries, throw the error
+      throw error;
     }
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    throw error;
+  }
+
+  // If we get here, all retries failed
+  if (lastError) {
+    logger.error({
+      payoutId,
+      retriesExhausted: MAX_RETRIES,
+      finalError: lastError.message,
+    }, '❌ Failed to process payout after all retries');
+    throw lastError;
   }
 });
 
