@@ -112,7 +112,8 @@ class CashfreeService {
 
   /**
    * Initialize Payout API configuration
-   * Supports Cashfree Payout API V2
+   * Uses Cashfree Payout API V2 (v1 and v1.2 are deprecated as of 2024)
+   * Reference: https://docs.cashfree.com/reference/v2transfer
    */
   private initializePayoutConfig(): CashfreePayoutConfig {
     if (!this.payoutConfig) {
@@ -133,18 +134,20 @@ class CashfreeService {
       this.payoutConfig = {
         clientId,
         clientSecret,
-        // Payout API V2 endpoints
+        // Payout API V2 endpoints (v1 and v1.2 deprecated)
+        // https://docs.cashfree.com/reference/pgpayoutsurl
         baseUrl: isProduction
-          ? 'https://payout-api.cashfree.com/payout/v1'
-          : 'https://payout-gamma.cashfree.com/payout/v1',
+          ? 'https://payout-api.cashfree.com/payout/v1.2'
+          : 'https://payout-gamma.cashfree.com/payout/v1.2',
         isProduction,
       };
 
       logger.info({
         environment: isProduction ? 'PRODUCTION' : 'SANDBOX',
         baseUrl: this.payoutConfig.baseUrl,
+        apiVersion: 'v2',
         clientIdPrefix: clientId.substring(0, 10) + '...',
-      }, '💸 Cashfree Payout API initialized');
+      }, '💸 Cashfree Payout API V2 initialized');
     }
     return this.payoutConfig;
   }
@@ -558,31 +561,33 @@ class CashfreeService {
         phone = phone.substring(2);
       }
 
+      // V2 API uses snake_case field names
       const payload: any = {
-        beneId: data.beneId,
-        name: data.name.substring(0, 100),
-        email: data.email,
-        phone: phone,
-        address1: data.address1 || 'India',
+        beneficiary_id: data.beneId,
+        beneficiary_name: data.name.substring(0, 100),
+        beneficiary_email: data.email,
+        beneficiary_phone: phone,
+        beneficiary_address1: data.address1 || 'India',
       };
 
       // Add either VPA (UPI) or bank account
       if (data.vpa) {
-        payload.vpa = data.vpa;
+        payload.beneficiary_vpa = data.vpa; // V2: beneficiary_vpa instead of vpa
       }
       if (data.bankAccount && data.ifsc) {
-        payload.bankAccount = data.bankAccount;
-        payload.ifsc = data.ifsc;
+        payload.beneficiary_bankAccount = data.bankAccount;
+        payload.beneficiary_ifsc = data.ifsc;
       }
 
       logger.info({
         beneId: data.beneId,
         hasVpa: !!data.vpa,
         hasBankAccount: !!data.bankAccount,
-      }, 'Creating beneficiary');
+        apiVersion: 'v2',
+      }, 'Creating beneficiary with V2 API');
 
       const response = await axios.post(
-        `${config.baseUrl}/addBeneficiary`,
+        `${config.baseUrl}/beneficiaries`, // V2 endpoint
         payload,
         {
           headers,
@@ -590,7 +595,7 @@ class CashfreeService {
         }
       );
 
-      logger.info({ beneId: data.beneId }, '✅ Beneficiary created successfully');
+      logger.info({ beneId: data.beneId }, '✅ Beneficiary created successfully with V2 API');
       return response.data;
     }, 'createBeneficiary').catch((error: any) => {
       // If beneficiary already exists, that's okay - return success
@@ -618,7 +623,7 @@ class CashfreeService {
       const headers = await this.getPayoutHeaders();
 
       const response = await axios.get(
-        `${config.baseUrl}/getBeneficiary/${beneId}`,
+        `${config.baseUrl}/beneficiaries/${beneId}`, // V2 endpoint
         {
           headers,
           timeout: 15000,
@@ -649,11 +654,12 @@ class CashfreeService {
         throw new Error('Minimum payout amount is ₹1');
       }
 
+      // V2 API uses snake_case field names
       const payload = {
-        beneId: data.beneId,
+        beneficiary_id: data.beneId, // V2: beneficiary_id instead of beneId
         amount: data.amount.toFixed(2), // Cashfree expects string with 2 decimal places
-        transferId: data.transferId,
-        transferMode: data.transferMode || 'upi',
+        transfer_id: data.transferId, // V2: transfer_id instead of transferId
+        transfer_mode: data.transferMode || 'upi', // V2: transfer_mode instead of transferMode
         remarks: data.remarks || 'Payout from Bestie App',
       };
 
@@ -661,11 +667,12 @@ class CashfreeService {
         transferId: data.transferId,
         amount: data.amount,
         beneId: data.beneId,
-        mode: payload.transferMode,
-      }, '💸 Requesting payout');
+        mode: payload.transfer_mode,
+        apiVersion: 'v2',
+      }, '💸 Requesting payout with V2 API');
 
       const response = await axios.post(
-        `${config.baseUrl}/requestTransfer`,
+        `${config.baseUrl}/transfers`, // V2 endpoint
         payload,
         {
           headers,
@@ -677,7 +684,8 @@ class CashfreeService {
         transferId: data.transferId,
         amount: data.amount,
         referenceId: response.data?.referenceId,
-      }, '✅ Payout requested successfully');
+        status: response.data?.status,
+      }, '✅ Payout requested successfully with V2 API');
 
       return response.data;
     }, 'requestPayout');
@@ -692,18 +700,18 @@ class CashfreeService {
       const headers = await this.getPayoutHeaders();
 
       const response = await axios.get(
-        `${config.baseUrl}/getTransferStatus`,
+        `${config.baseUrl}/transfers/${transferId}`, // V2 endpoint - REST style path parameter
         {
           headers,
-          params: { transferId },
           timeout: 15000,
         }
       );
 
       logger.info({
         transferId,
-        status: response.data?.transfer?.status
-      }, 'Payout status retrieved');
+        status: response.data?.transfer?.status,
+        apiVersion: 'v2',
+      }, 'Payout status retrieved with V2 API');
 
       return response.data;
     }, 'getPayoutStatus');
@@ -718,7 +726,7 @@ class CashfreeService {
       const headers = await this.getPayoutHeaders();
 
       const response = await axios.get(
-        `${config.baseUrl}/getBalance`,
+        `${config.baseUrl}/balance`, // V2 endpoint
         {
           headers,
           timeout: 15000,
@@ -726,8 +734,9 @@ class CashfreeService {
       );
 
       logger.info({
-        balance: response.data?.data?.balance
-      }, 'Payout balance retrieved');
+        balance: response.data?.data?.balance,
+        apiVersion: 'v2',
+      }, 'Payout balance retrieved with V2 API');
 
       return response.data;
     }, 'getPayoutBalance');
