@@ -206,19 +206,19 @@ class CashfreeService {
   }
 
   /**
-   * Get headers for Payout API calls - V2 uses direct authentication
-   * V2 API does NOT use Bearer tokens - uses Client ID/Secret directly
+   * Get headers for Payout API calls - V2 uses Basic authentication
+   * V2 API uses Basic auth with Client ID:Client Secret
    * Reference: https://docs.cashfree.com/reference/pgpayoutsurl
    */
   private async getPayoutHeaders() {
     const config = this.initializePayoutConfig();
 
-    // V2 API uses direct Client ID and Secret authentication
-    // No token generation needed!
+    // V2 API uses Basic authentication with Client ID and Secret
+    const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+    
     return {
       'Content-Type': 'application/json',
-      'X-Client-Id': config.clientId,
-      'X-Client-Secret': config.clientSecret,
+      'Authorization': `Basic ${credentials}`,
     };
   }
 
@@ -635,6 +635,20 @@ class CashfreeService {
         }
       );
 
+      // Check if Cashfree returned an error
+      if (response.data?.status === 'ERROR') {
+        logger.error({
+          transferId: data.transferId,
+          error: response.data,
+          subCode: response.data?.subCode,
+          message: response.data?.message,
+        }, '❌ Cashfree returned ERROR status in transfer response');
+
+        throw new Error(
+          `Cashfree transfer failed: ${response.data?.message || 'Unknown error'} (${response.data?.subCode || 'No code'})`
+        );
+      }
+
       logger.info({
         transferId: data.transferId,
         amount: data.amount,
@@ -737,7 +751,7 @@ class CashfreeService {
         configured: !!payoutCfg,
         environment: payoutCfg?.isProduction ? 'PRODUCTION' : 'SANDBOX',
         baseUrl: payoutCfg?.baseUrl,
-        authMethod: 'Direct Client ID/Secret (V2)', // V2 uses direct auth, no tokens
+        authMethod: 'Basic Authentication (V2)', // V2 uses Basic auth with Client ID:Secret
       },
     };
   }
