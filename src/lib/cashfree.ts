@@ -222,37 +222,74 @@ class CashfreeService {
       logger.info({
         baseUrl: config.baseUrl,
         clientIdPrefix: config.clientId?.substring(0, 10),
-      }, 'Requesting Cashfree Payout token');
+        clientIdLength: config.clientId?.length,
+        hasClientSecret: !!config.clientSecret,
+        clientSecretLength: config.clientSecret?.length,
+        environment: config.isProduction ? 'PRODUCTION' : 'SANDBOX',
+      }, 'Requesting Cashfree Payout token with credentials');
 
-      const response = await axios.post(
-        `${config.baseUrl}/authorize`,
-        {},
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Client-Id': config.clientId,
-            'X-Client-Secret': config.clientSecret,
-          },
-          timeout: 15000,
+      try {
+        const response = await axios.post(
+          `${config.baseUrl}/authorize`,
+          {},
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Client-Id': config.clientId,
+              'X-Client-Secret': config.clientSecret,
+            },
+            timeout: 15000,
+          }
+        );
+
+        logger.info({
+          status: response.status,
+          dataKeys: Object.keys(response.data || {}),
+          responseData: response.data,
+        }, 'Token response received');
+
+        // Handle different response structures from Cashfree
+        const token = response.data?.data?.token || response.data?.token;
+        const expiresAt = response.data?.data?.expiry || response.data?.expiry;
+
+        if (!token) {
+          logger.error({
+            response: response.data,
+            status: response.status,
+          }, '❌ No token in response');
+          throw new Error(`Invalid token response: ${JSON.stringify(response.data)}`);
         }
-      );
 
-      // Handle different response structures from Cashfree
-      const token = response.data?.data?.token || response.data?.token;
-      const expiresAt = response.data?.data?.expiry || response.data?.expiry;
+        this.payoutToken = token;
+        // Set expiry based on response or default to 4 minutes
+        this.payoutTokenExpiry = expiresAt
+          ? new Date(expiresAt).getTime()
+          : Date.now() + 4 * 60 * 1000;
 
-      if (!token) {
-        throw new Error(`Invalid token response: ${JSON.stringify(response.data)}`);
+        logger.info('✅ Cashfree Payout token obtained successfully');
+        return this.payoutToken;
+      } catch (error: any) {
+        logger.error({
+          error: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+          clientIdPrefix: config.clientId?.substring(0, 10),
+          baseUrl: config.baseUrl,
+        }, '❌ Failed to get payout token');
+
+        // Check for specific authentication errors
+        if (error.response?.status === 403 || error.response?.data?.subCode === '403') {
+          throw new Error(
+            `Payout API authentication failed (403). Please verify:\n` +
+            `1. CASHFREE_PAYOUT_CLIENT_ID is correct\n` +
+            `2. CASHFREE_PAYOUT_CLIENT_SECRET is correct\n` +
+            `3. Credentials match the environment (${config.isProduction ? 'PRODUCTION' : 'SANDBOX'})\n` +
+            `Error: ${error.response?.data?.message || error.message}`
+          );
+        }
+
+        throw error;
       }
-
-      this.payoutToken = token;
-      // Set expiry based on response or default to 4 minutes
-      this.payoutTokenExpiry = expiresAt
-        ? new Date(expiresAt).getTime()
-        : Date.now() + 4 * 60 * 1000;
-
-      logger.info('✅ Cashfree Payout token obtained successfully');
-      return this.payoutToken;
     }, 'getPayoutToken');
   }
 
