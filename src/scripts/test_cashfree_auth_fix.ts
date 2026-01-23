@@ -65,7 +65,7 @@ if (require.main === module) {
             process.exit(0);
         })
         .catch((error) => {
-            logger.error('❌ Test failed', { error: error.message });
+            logger.error({ error: error.message }, '❌ Test failed');
             process.exit(1);
         });
 }
