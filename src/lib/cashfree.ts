@@ -41,8 +41,7 @@ const RETRY_CONFIG = {
 class CashfreeService {
   private config: CashfreeConfig | null = null;
   private payoutConfig: CashfreePayoutConfig | null = null;
-  private payoutToken: string | null = null;
-  private payoutTokenExpiry: number = 0;
+  // Note: V2 Payout API doesn't use tokens - uses direct Client ID/Secret auth
 
   /**
    * Detect if credentials are for production or sandbox
@@ -207,100 +206,19 @@ class CashfreeService {
   }
 
   /**
-   * Get authentication token for Payout API
-   * Tokens are cached and refreshed before expiry
-   */
-  private async getPayoutToken(): Promise<string> {
-    // Return cached token if still valid (with 30 second buffer)
-    if (this.payoutToken && Date.now() < this.payoutTokenExpiry - 30000) {
-      return this.payoutToken;
-    }
-
-    return this.withRetry(async () => {
-      const config = this.initializePayoutConfig();
-
-      logger.info({
-        baseUrl: config.baseUrl,
-        clientIdPrefix: config.clientId?.substring(0, 10),
-        clientIdLength: config.clientId?.length,
-        hasClientSecret: !!config.clientSecret,
-        clientSecretLength: config.clientSecret?.length,
-        environment: config.isProduction ? 'PRODUCTION' : 'SANDBOX',
-      }, 'Requesting Cashfree Payout token with credentials');
-
-      try {
-        const response = await axios.post(
-          `${config.baseUrl}/authorize`,
-          {},
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Client-Id': config.clientId,
-              'X-Client-Secret': config.clientSecret,
-            },
-            timeout: 15000,
-          }
-        );
-
-        logger.info({
-          status: response.status,
-          dataKeys: Object.keys(response.data || {}),
-          responseData: response.data,
-        }, 'Token response received');
-
-        // Handle different response structures from Cashfree
-        const token = response.data?.data?.token || response.data?.token;
-        const expiresAt = response.data?.data?.expiry || response.data?.expiry;
-
-        if (!token) {
-          logger.error({
-            response: response.data,
-            status: response.status,
-          }, '❌ No token in response');
-          throw new Error(`Invalid token response: ${JSON.stringify(response.data)}`);
-        }
-
-        this.payoutToken = token;
-        // Set expiry based on response or default to 4 minutes
-        this.payoutTokenExpiry = expiresAt
-          ? new Date(expiresAt).getTime()
-          : Date.now() + 4 * 60 * 1000;
-
-        logger.info('✅ Cashfree Payout token obtained successfully');
-        return this.payoutToken;
-      } catch (error: any) {
-        logger.error({
-          error: error.message,
-          response: error.response?.data,
-          status: error.response?.status,
-          clientIdPrefix: config.clientId?.substring(0, 10),
-          baseUrl: config.baseUrl,
-        }, '❌ Failed to get payout token');
-
-        // Check for specific authentication errors
-        if (error.response?.status === 403 || error.response?.data?.subCode === '403') {
-          throw new Error(
-            `Payout API authentication failed (403). Please verify:\n` +
-            `1. CASHFREE_PAYOUT_CLIENT_ID is correct\n` +
-            `2. CASHFREE_PAYOUT_CLIENT_SECRET is correct\n` +
-            `3. Credentials match the environment (${config.isProduction ? 'PRODUCTION' : 'SANDBOX'})\n` +
-            `Error: ${error.response?.data?.message || error.message}`
-          );
-        }
-
-        throw error;
-      }
-    }, 'getPayoutToken');
-  }
-
-  /**
-   * Get headers for Payout API calls
+   * Get headers for Payout API calls - V2 uses direct authentication
+   * V2 API does NOT use Bearer tokens - uses Client ID/Secret directly
+   * Reference: https://docs.cashfree.com/reference/pgpayoutsurl
    */
   private async getPayoutHeaders() {
-    const token = await this.getPayoutToken();
+    const config = this.initializePayoutConfig();
+
+    // V2 API uses direct Client ID and Secret authentication
+    // No token generation needed!
     return {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
+      'X-Client-Id': config.clientId,
+      'X-Client-Secret': config.clientSecret,
     };
   }
 
@@ -819,8 +737,7 @@ class CashfreeService {
         configured: !!payoutCfg,
         environment: payoutCfg?.isProduction ? 'PRODUCTION' : 'SANDBOX',
         baseUrl: payoutCfg?.baseUrl,
-        hasToken: !!this.payoutToken,
-        tokenExpiry: this.payoutTokenExpiry ? new Date(this.payoutTokenExpiry).toISOString() : null,
+        authMethod: 'Direct Client ID/Secret (V2)', // V2 uses direct auth, no tokens
       },
     };
   }
