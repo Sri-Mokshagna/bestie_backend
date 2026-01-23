@@ -258,9 +258,38 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
           transferId,
           amount: payout.amountINR,
           upiId: payout.upiId,
-        }, '💸 Processing payout via Cashfree');
+          responderName: user.profile?.name,
+          responderPhone: user.phone,
+          responderEmail: user.email,
+        }, '💸 Processing payout via Cashfree - FULL DETAILS');
+
+        // Step 0: Check payout balance first
+        try {
+          const balance = await cashfreeService.getPayoutBalance();
+          logger.info({
+            currentBalance: balance.data?.balance,
+            payoutAmount: payout.amountINR,
+            sufficientFunds: (balance.data?.balance || 0) >= payout.amountINR,
+          }, '💰 Payout account balance check');
+
+          if ((balance.data?.balance || 0) < payout.amountINR) {
+            throw new Error(`Insufficient payout balance. Available: ₹${balance.data?.balance}, Required: ₹${payout.amountINR}`);
+          }
+        } catch (balanceError: any) {
+          logger.error({
+            error: balanceError.message,
+            response: balanceError.response?.data,
+          }, '❌ Failed to check payout balance - continuing anyway');
+          // Continue anyway - the requestPayout will fail if insufficient
+        }
 
         // Step 1: Create/Register beneficiary with Cashfree
+        logger.info({
+          beneId,
+          name: user.profile?.name || 'Responder',
+          upiId: payout.upiId,
+        }, '👤 Creating/verifying beneficiary');
+
         await cashfreeService.createBeneficiary({
           beneId,
           name: user.profile?.name || 'Responder',
@@ -269,7 +298,17 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
           vpa: payout.upiId,
         });
 
+        logger.info({ beneId }, '✅ Beneficiary created/verified successfully');
+
         // Step 2: Request payout transfer
+        logger.info({
+          transferId,
+          beneId,
+          amount: payout.amountINR,
+          transferMode: 'upi',
+          upiId: payout.upiId,
+        }, '💸 REQUESTING PAYOUT TRANSFER - This is the critical step');
+
         const payoutResponse = await cashfreeService.requestPayout({
           transferId,
           beneId,
@@ -278,13 +317,27 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
           remarks: `Bestie payout - ${payout.coins} coins`,
         });
 
+        logger.info({
+          transferId,
+          cashfreeResponse: payoutResponse,
+          responseKeys: Object.keys(payoutResponse || {}),
+          referenceId: payoutResponse?.referenceId,
+          status: payoutResponse?.status,
+        }, '✅ PAYOUT TRANSFER REQUEST RESPONSE - Full details');
+
         // Step 3: Update payout with gateway response
         payout.status = PayoutStatus.COMPLETED;
         payout.completedAt = new Date();
         payout.gatewayResponse = {
-          ...payoutResponse,
+          status: 'SUCCESS',
           transferId,
           beneId,
+          amount: payout.amountINR,
+          upiId: payout.upiId,
+          requestedAt: new Date().toISOString(),
+          cashfreeResponse: payoutResponse, // Full Cashfree response for debugging
+          referenceId: payoutResponse?.referenceId,
+          transferStatus: payoutResponse?.status,
         };
         await payout.save({ session });
 

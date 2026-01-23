@@ -352,7 +352,7 @@ export class AdMobService {
 
   /**
    * Check if user can watch ad (rate limiting)
-   * Limit: 3 rewarded videos per hour
+   * Limit: 1 rewarded video per hour
    */
   async canWatchAd(userId: string, adType: 'rewarded_video' | 'interstitial'): Promise<{
     canWatch: boolean;
@@ -360,7 +360,7 @@ export class AdMobService {
     nextAvailableAt?: Date;
     adsWatchedThisHour?: number;
   }> {
-    // Implement hourly rate limiting: 3 rewarded videos per hour
+    // Implement hourly rate limiting: 1 rewarded video per hour
     const now = new Date();
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000); // 1 hour ago
 
@@ -371,7 +371,7 @@ export class AdMobService {
       createdAt: { $gte: oneHourAgo },
     });
 
-    const maxPerHour = adType === 'rewarded_video' ? 3 : 10; // 3 rewarded videos per hour
+    const maxPerHour = adType === 'rewarded_video' ? 1 : 10; // 1 rewarded video per hour
 
     if (hourCount >= maxPerHour) {
       // Calculate when the oldest ad from this hour will expire
