@@ -133,11 +133,11 @@ class CashfreeService {
       this.payoutConfig = {
         clientId,
         clientSecret,
-        // Payout API V2 endpoints (v1 and v1.2 deprecated)
-        // https://docs.cashfree.com/reference/pgpayoutsurl
+        // V2 API base URLs (different from V1/V1.2!)
+        // Reference: https://docs.cashfree.com/docs/payout-api-reference
         baseUrl: isProduction
-          ? 'https://payout-api.cashfree.com/payout/v1.2'
-          : 'https://payout-gamma.cashfree.com/payout/v1.2',
+          ? 'https://api.cashfree.com/payout'
+          : 'https://sandbox.cashfree.com/payout',
         isProduction,
       };
 
