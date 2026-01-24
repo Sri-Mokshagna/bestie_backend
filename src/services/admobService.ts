@@ -35,7 +35,7 @@ export class AdMobService {
 
   // Default reward configuration
   private rewardConfig: AdRewardConfig = {
-    adRewardPoints: 10, // 10 points per ad (configurable by admin)
+    adRewardPoints: 4, // 4 points per ad (configurable by admin)
     rewardedVideoCoins: 0, // No longer used
     interstitialCoins: 0,
     bannerClickCoins: 0,
@@ -45,7 +45,7 @@ export class AdMobService {
   private constructor() {
     // Load config from environment
     this.rewardConfig.adRewardPoints = parseInt(
-      process.env.ADMOB_AD_REWARD_POINTS || '10'
+      process.env.ADMOB_AD_REWARD_POINTS || '4'
     );
     this.rewardConfig.enabled = process.env.ADMOB_REWARDS_ENABLED !== 'false';
   }
