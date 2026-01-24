@@ -321,6 +321,11 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
             amount: payout.amountINR,
             transferMode: 'upi',
             remarks: `Bestie payout - ${payout.coins} coins`,
+            // V2 API requires beneficiary details in transfer request
+            beneficiaryName: user.profile?.name || 'Responder',
+            beneficiaryEmail: user.email || `responder_${responder._id}@bestie.app`,
+            beneficiaryPhone: user.phone || '9999999999',
+            beneficiaryVpa: payout.upiId,
           });
 
           logger.info({
