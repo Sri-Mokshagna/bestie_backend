@@ -610,7 +610,7 @@ class CashfreeService {
       // V2 API field names (snake_case)
       const payload = {
         beneficiary_id: data.beneId, // V2: beneficiary_id
-        amount: data.amount, // V2: number (not string)
+        transfer_amount: data.amount, // V2: transfer_amount (not just 'amount')
         transfer_id: data.transferId, // V2: transfer_id
         transfer_mode: data.transferMode || 'upi', // V2: transfer_mode
         remarks: data.remarks || 'Payout from Bestie App',
