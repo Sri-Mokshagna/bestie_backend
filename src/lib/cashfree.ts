@@ -205,73 +205,6 @@ class CashfreeService {
     throw lastError;
   }
 
-  /**
-   * Get OAuth Bearer token for Payout V1 API
-   * V1 requires token-based authentication via /authorize endpoint
-   * Reference: https://docs.cashfree.com/docs/payout/guide/#authentication
-   */
-  private async getPayoutAuthToken(): Promise<string> {
-    // Check if we have a valid cached token
-    if (this.payoutAuthToken && this.tokenExpiryTime && Date.now() < this.tokenExpiryTime) {
-      return this.payoutAuthToken;
-    }
-
-    const config = this.initializePayoutConfig();
-
-    try {
-      // Request OAuth token from Cashfree V1 /authorize endpoint
-      const authResponse = await axios.post(
-        `${config.baseUrl}/authorize`,
-        {}, // Empty body for auth
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Client-Id': config.clientId,
-            'X-Client-Secret': config.clientSecret,
-          },
-          timeout: 15000,
-        }
-      );
-
-      if (authResponse.data?.status === 'SUCCESS' && authResponse.data?.data?.token) {
-        this.payoutAuthToken = authResponse.data.data.token;
-        // V1 tokens typically expire in 10-30 minutes
-        const expiresIn = authResponse.data.data.expiry || 600; // Default to 10 mins
-        this.tokenExpiryTime = Date.now() + (expiresIn - 60) * 1000; // Subtract 60s buffer
-
-        logger.info({
-          tokenExpiresIn: expiresIn,
-          tokenExpiryTime: new Date(this.tokenExpiryTime).toISOString(),
-        }, '✅ Payout V1 OAuth token acquired');
-
-        return this.payoutAuthToken;
-      } else {
-        throw new Error(`OAuth token acquisition failed: ${JSON.stringify(authResponse.data)}`);
-      }
-    } catch (error: any) {
-      logger.error({
-        error: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-      }, '❌ Failed to acquire payout OAuth token');
-
-      throw error;
-    }
-  }
-
-  /**
-   * Get headers for Payout V1 API calls
-   * V1 uses OAuth Bearer token authentication
-   * Reference: https://docs.cashfree.com/docs/payout/guide/
-   */
-  private async getPayoutHeaders() {
-    const token = await this.getPayoutAuthToken();
-
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    };
-  }
 
   /**
    * Get headers for Payout V2 API calls
@@ -640,7 +573,7 @@ class CashfreeService {
   async getBeneficiary(beneId: string) {
     return this.withRetry(async () => {
       const config = this.initializePayoutConfig();
-      const headers = await this.getPayoutHeaders();
+      const headers = this.getPayoutHeadersV2();
 
       const response = await axios.get(
         `${config.baseUrl}/beneficiaries/${beneId}`, // V2 endpoint
@@ -667,7 +600,7 @@ class CashfreeService {
   }) {
     return this.withRetry(async () => {
       const config = this.initializePayoutConfig();
-      const headers = await this.getPayoutHeaders();
+      const headers = this.getPayoutHeadersV2();
 
       // Validate minimum amount (Cashfree minimum is ₹1)
       if (data.amount < 1) {
