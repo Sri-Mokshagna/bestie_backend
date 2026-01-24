@@ -41,9 +41,7 @@ const RETRY_CONFIG = {
 class CashfreeService {
   private config: CashfreeConfig | null = null;
   private payoutConfig: CashfreePayoutConfig | null = null;
-  private payoutAuthToken: string | null = null;
-  private tokenExpiryTime: number | null = null;
-  // Note: Recent Cashfree Payout V2 API requires authentication token
+  // Note: Cashfree Payout V2 API uses simplified auth with Client ID and Secret (no token needed)
 
   /**
    * Detect if credentials are for production or sandbox
@@ -208,85 +206,20 @@ class CashfreeService {
   }
 
   /**
-   * Get authentication token for Payout API calls
-   * Recent Cashfree Payout V2 API requires a separate authentication token
-   */
-  private async getPayoutAuthToken(): Promise<string> {
-    // Check if we have a valid cached token
-    if (this.payoutAuthToken && this.tokenExpiryTime && Date.now() < this.tokenExpiryTime) {
-      return this.payoutAuthToken;
-    }
-
-    const config = this.initializePayoutConfig();
-    
-    try {
-      // Request authentication token from Cashfree
-      const authResponse = await axios.post(
-        `${config.baseUrl.replace('/payout/v1.2', '')}/auth/token`, // Authentication endpoint
-        {}, // Empty body for auth
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Client-ID': config.clientId,
-            'X-Client-Secret': config.clientSecret,
-          },
-          timeout: 15000,
-        }
-      );
-
-      if (authResponse.data?.status === 'success' && authResponse.data?.token) {
-        this.payoutAuthToken = authResponse.data.token;
-        // Set expiry time (subtract 60 seconds for buffer)
-        const expiresIn = authResponse.data.expires_in || 1800; // Default to 30 mins
-        this.tokenExpiryTime = Date.now() + (expiresIn - 60) * 1000;
-        
-        logger.info({
-          tokenExpiresIn: expiresIn,
-          tokenExpiryTime: new Date(this.tokenExpiryTime).toISOString(),
-        }, '✅ Payout authentication token acquired');
-        
-        return this.payoutAuthToken;
-      } else {
-        // Fallback to direct authentication if token endpoint fails
-        logger.warn('Authentication token endpoint failed, falling back to direct authentication');
-        
-        // Generate a temporary token-like value using the credentials
-        const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
-        return credentials;
-      }
-    } catch (error: any) {
-      logger.error({
-        error: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-      }, '⚠️ Failed to acquire payout authentication token, falling back to direct auth');
-      
-      // Fallback to direct authentication
-      const fallbackConfig = this.initializePayoutConfig();
-      const credentials = Buffer.from(`${fallbackConfig.clientId}:${fallbackConfig.clientSecret}`).toString('base64');
-      return credentials;
-    }
-  }
-
-  /**
-   * Get headers for Payout API calls - Uses authentication token
+   * Get headers for Payout API V2 calls
+   * V2 uses simplified authentication - just Client ID and Secret in headers (no token needed)
    * Reference: https://docs.cashfree.com/reference/pgpayoutsurl
    */
   private async getPayoutHeaders() {
-    const token = await this.getPayoutAuthToken();
-    
-    // Check if the token looks like a Base64 encoded credential (fallback case)
-    if (token.length > 50) { // Base64 encoded credentials are typically longer
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${token}`,
-      };
-    } else {
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      };
-    }
+    const config = this.initializePayoutConfig();
+
+    // V2 API uses simplified authentication with X-Client-Id and X-Client-Secret headers
+    // No token generation needed - much simpler than V1!
+    return {
+      'Content-Type': 'application/json',
+      'X-Client-Id': config.clientId,
+      'X-Client-Secret': config.clientSecret,
+    };
   }
 
   /**
@@ -818,7 +751,7 @@ class CashfreeService {
         configured: !!payoutCfg,
         environment: payoutCfg?.isProduction ? 'PRODUCTION' : 'SANDBOX',
         baseUrl: payoutCfg?.baseUrl,
-        authMethod: 'Token-Based with Fallback (V2)', // V2 uses token auth with direct auth fallback
+        authMethod: 'Simplified V2 (X-Client-Id/X-Client-Secret)', // V2 uses direct header auth
       },
     };
   }

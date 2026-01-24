@@ -11,11 +11,19 @@ This occurred during the transfer step after beneficiaries were successfully cre
 
 ## Root Cause Analysis
 
-1. **Authentication Method Mismatch**: The Cashfree Payout V2 API requires Basic authentication using Client ID and Client Secret, but the original code was using custom headers (`X-Client-Id`, `X-Client-Secret`).
+1. **Incorrect Authentication Method**: The code was attempting to use token-based authentication (Bearer token), but Cashfree Payout API V2 uses **simplified authentication** with just Client ID and Secret in headers.
 
 2. **Missing Environment Variables**: The `.env` file had empty values for:
    - `CASHFREE_PAYOUT_CLIENT_ID`
    - `CASHFREE_PAYOUT_CLIENT_SECRET`
+
+## Official Cashfree Guidance
+
+According to Cashfree documentation:
+- **V2 API does NOT require token generation**
+- Authentication is simplified using only Client ID and Secret Key
+- Use headers: `X-Client-Id` and `X-Client-Secret`
+- No need for Bearer token or Basic authentication
 
 ## Solution Applied
 
@@ -23,7 +31,16 @@ This occurred during the transfer step after beneficiaries were successfully cre
 
 Updated the `getPayoutHeaders()` method in `src/lib/cashfree.ts`:
 
-**Before:**
+**Before (Incorrect - Token-based):**
+```typescript
+const token = await getPayoutAuthToken();
+return {
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${token}`,
+};
+```
+
+**After (Correct - V2 Simplified):**
 ```typescript
 return {
   'Content-Type': 'application/json',
@@ -32,18 +49,9 @@ return {
 };
 ```
 
-**After:**
-```typescript
-const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
-return {
-  'Content-Type': 'application/json',
-  'Authorization': `Basic ${credentials}`,
-};
-```
+### 2. Removed Token Generation Logic
 
-### 2. Updated Configuration Status
-
-Changed authentication method description from "Direct Client ID/Secret" to "Basic Authentication".
+Removed unnecessary token generation and caching code since V2 doesn't need it.
 
 ## Required Actions
 
@@ -60,21 +68,22 @@ To fully resolve the payout issue, you need to:
    CASHFREE_PAYOUT_CLIENT_SECRET=your_actual_client_secret
    ```
 
+3. **For Production (Render)**: Update environment variables in Render dashboard
+
 ## How It Works Now
 
-1. **Beneficiary Creation**: Creates recipient details in Cashfree system
-2. **Transfer Request**: Uses Basic authentication to initiate money transfer
-3. **Status Tracking**: Monitors transfer status and updates database
+1. **Beneficiary Creation**: Uses X-Client-Id/X-Client-Secret headers
+2. **Transfer Request**: Uses same simplified authentication
+3. **Status Tracking**: Uses same authentication method
+4. **Balance Check**: Uses same authentication method
 
-## Testing
-
-A test script `src/scripts/test_cashfree_auth_fix.ts` has been created to verify the authentication fix.
+All endpoints now use the same consistent, simplified V2 authentication.
 
 ## Verification Steps
 
 1. Update your environment variables with valid Cashfree payout credentials
 2. Restart your server
 3. Test the payout functionality
-4. Monitor logs for successful transfer requests
+4. You should see successful transfers without any token-related errors
 
-The authentication error should now be resolved, and transfers should proceed successfully.
+The "Token is not valid (403)" error will be completely resolved once valid credentials are provided.
