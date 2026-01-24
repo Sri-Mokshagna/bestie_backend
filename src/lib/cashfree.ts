@@ -217,6 +217,7 @@ class CashfreeService {
     // No token generation needed - much simpler than V1!
     return {
       'Content-Type': 'application/json',
+      'x-api-version': '2024-01-01', // V2 API requires version header in YYYY-MM-DD format
       'X-Client-Id': config.clientId,
       'X-Client-Secret': config.clientSecret,
     };
