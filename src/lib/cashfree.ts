@@ -629,9 +629,11 @@ class CashfreeService {
           beneficiary_phone: data.beneficiaryPhone || '9999999999',
         };
 
-        // Add VPA if it's a UPI transfer
+        // V2 requires VPA inside beneficiary_instrument_details for UPI transfers
         if (data.beneficiaryVpa && data.transferMode === 'upi') {
-          payload.beneficiary_details.beneficiary_vpa = data.beneficiaryVpa;
+          payload.beneficiary_details.beneficiary_instrument_details = {
+            vpa: data.beneficiaryVpa,
+          };
         }
       }
 
