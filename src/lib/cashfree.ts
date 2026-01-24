@@ -41,7 +41,9 @@ const RETRY_CONFIG = {
 class CashfreeService {
   private config: CashfreeConfig | null = null;
   private payoutConfig: CashfreePayoutConfig | null = null;
-  // Note: Cashfree Payout V2 API uses simplified auth with Client ID and Secret (no token needed)
+  private payoutAuthToken: string | null = null;
+  private tokenExpiryTime: number | null = null;
+  // Note: Cashfree Payout V1 API uses OAuth Bearer token authentication
 
   /**
    * Detect if credentials are for production or sandbox
@@ -133,20 +135,20 @@ class CashfreeService {
       this.payoutConfig = {
         clientId,
         clientSecret,
-        // V2 API base URLs (different from V1/V1.2!)
-        // Reference: https://docs.cashfree.com/docs/payout-api-reference
+        // Payout V1 API (most stable, recommended by Cashfree)
+        // Reference: https://docs.cashfree.com/docs/payout/guide/
         baseUrl: isProduction
-          ? 'https://api.cashfree.com/payout'
-          : 'https://sandbox.cashfree.com/payout',
+          ? 'https://payout-api.cashfree.com/payout/v1'
+          : 'https://payout-gamma.cashfree.com/payout/v1',
         isProduction,
       };
 
       logger.info({
         environment: isProduction ? 'PRODUCTION' : 'SANDBOX',
         baseUrl: this.payoutConfig.baseUrl,
-        apiVersion: 'v2',
+        apiVersion: 'v1',
         clientIdPrefix: clientId.substring(0, 10) + '...',
-      }, '💸 Cashfree Payout API V2 initialized');
+      }, '💸 Cashfree Payout API V1 initialized');
     }
     return this.payoutConfig;
   }
@@ -206,21 +208,70 @@ class CashfreeService {
   }
 
   /**
-   * Get headers for Payout API V2 calls
-   * V2 uses simplified authentication - just Client ID and Secret in headers (no token needed)
-   * V2 API version is determined by the base URL, not by headers
-   * Reference: https://docs.cashfree.com/reference/pgpayoutsurl
+   * Get OAuth Bearer token for Payout V1 API
+   * V1 requires token-based authentication via /authorize endpoint
+   * Reference: https://docs.cashfree.com/docs/payout/guide/#authentication
+   */
+  private async getPayoutAuthToken(): Promise<string> {
+    // Check if we have a valid cached token
+    if (this.payoutAuthToken && this.tokenExpiryTime && Date.now() < this.tokenExpiryTime) {
+      return this.payoutAuthToken;
+    }
+
+    const config = this.initializePayoutConfig();
+    
+    try {
+      // Request OAuth token from Cashfree V1 /authorize endpoint
+      const authResponse = await axios.post(
+        `${config.baseUrl}/authorize`,
+        {}, // Empty body for auth
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Client-Id': config.clientId,
+            'X-Client-Secret': config.clientSecret,
+          },
+          timeout: 15000,
+        }
+      );
+
+      if (authResponse.data?.status === 'SUCCESS' && authResponse.data?.data?.token) {
+        this.payoutAuthToken = authResponse.data.data.token;
+        // V1 tokens typically expire in 10-30 minutes
+        const expiresIn = authResponse.data.data.expiry || 600; // Default to 10 mins
+        this.tokenExpiryTime = Date.now() + (expiresIn - 60) * 1000; // Subtract 60s buffer
+        
+        logger.info({
+          tokenExpiresIn: expiresIn,
+          tokenExpiryTime: new Date(this.tokenExpiryTime).toISOString(),
+        }, '✅ Payout V1 OAuth token acquired');
+        
+        return this.payoutAuthToken;
+      } else {
+        throw new Error(`OAuth token acquisition failed: ${JSON.stringify(authResponse.data)}`);
+      }
+    } catch (error: any) {
+      logger.error({
+        error: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      }, '❌ Failed to acquire payout OAuth token');
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Get headers for Payout V1 API calls
+   * V1 uses OAuth Bearer token authentication
+   * Reference: https://docs.cashfree.com/docs/payout/guide/
    */
   private async getPayoutHeaders() {
-    const config = this.initializePayoutConfig();
-
-    // V2 API uses simplified authentication with X-Client-Id and X-Client-Secret headers
-    // No token generation needed - much simpler than V1!
-    // No version header needed - version is implicit in base URL
+    const token = await this.getPayoutAuthToken();
+    
     return {
       'Content-Type': 'application/json',
-      'X-Client-Id': config.clientId,
-      'X-Client-Secret': config.clientSecret,
+      'Authorization': `Bearer ${token}`,
     };
   }
 
@@ -518,33 +569,33 @@ class CashfreeService {
         phone = phone.substring(2);
       }
 
-      // V2 API uses snake_case field names
+      // V1 API field names (no snake_case prefixes like V2)
       const payload: any = {
-        beneficiary_id: data.beneId,
-        beneficiary_name: data.name.substring(0, 100),
-        beneficiary_email: data.email,
-        beneficiary_phone: phone,
-        beneficiary_address1: data.address1 || 'India',
+        beneId: data.beneId,
+        name: data.name.substring(0, 100),
+        email: data.email,
+        phone: phone,
+        address1: data.address1 || 'India',
       };
 
       // Add either VPA (UPI) or bank account
       if (data.vpa) {
-        payload.beneficiary_vpa = data.vpa; // V2: beneficiary_vpa instead of vpa
+        payload.vpa = data.vpa; // V1: vpa (not beneficiary_vpa)
       }
       if (data.bankAccount && data.ifsc) {
-        payload.beneficiary_bankAccount = data.bankAccount;
-        payload.beneficiary_ifsc = data.ifsc;
+        payload.bankAccount = data.bankAccount;
+        payload.ifsc = data.ifsc;
       }
 
       logger.info({
         beneId: data.beneId,
         hasVpa: !!data.vpa,
         hasBankAccount: !!data.bankAccount,
-        apiVersion: 'v2',
-      }, 'Creating beneficiary with V2 API');
+        apiVersion: 'v1',
+      }, 'Creating beneficiary with V1 API');
 
       const response = await axios.post(
-        `${config.baseUrl}/beneficiaries`, // V2 endpoint
+        `${config.baseUrl}/addBeneficiary`, // V1 endpoint
         payload,
         {
           headers,
@@ -552,7 +603,7 @@ class CashfreeService {
         }
       );
 
-      logger.info({ beneId: data.beneId }, '✅ Beneficiary created successfully with V2 API');
+      logger.info({ beneId: data.beneId }, '✅ Beneficiary created successfully with V1 API');
       return response.data;
     }, 'createBeneficiary').catch((error: any) => {
       // If beneficiary already exists, that's okay - return success
@@ -580,7 +631,7 @@ class CashfreeService {
       const headers = await this.getPayoutHeaders();
 
       const response = await axios.get(
-        `${config.baseUrl}/beneficiaries/${beneId}`, // V2 endpoint
+        `${config.baseUrl}/getBeneficiary/${beneId}`, // V1 endpoint
         {
           headers,
           timeout: 15000,
@@ -611,12 +662,12 @@ class CashfreeService {
         throw new Error('Minimum payout amount is ₹1');
       }
 
-      // V2 API uses snake_case field names
+      // V1 API field names (camelCase, not snake_case)
       const payload = {
-        beneficiary_id: data.beneId, // V2: beneficiary_id instead of beneId
-        amount: data.amount.toFixed(2), // Cashfree expects string with 2 decimal places
-        transfer_id: data.transferId, // V2: transfer_id instead of transferId
-        transfer_mode: data.transferMode || 'upi', // V2: transfer_mode instead of transferMode
+        beneId: data.beneId, // V1: beneId (not beneficiary_id)
+        amount: data.amount.toString(), // Cashfree expects string
+        transferId: data.transferId, // V1: transferId (not transfer_id)
+        transferMode: data.transferMode || 'upi', // V1: transferMode (not transfer_mode)
         remarks: data.remarks || 'Payout from Bestie App',
       };
 
@@ -624,12 +675,12 @@ class CashfreeService {
         transferId: data.transferId,
         amount: data.amount,
         beneId: data.beneId,
-        mode: payload.transfer_mode,
-        apiVersion: 'v2',
-      }, '💸 Requesting payout with V2 API');
+        mode: payload.transferMode,
+        apiVersion: 'v1',
+      }, '💸 Requesting payout with V1 API');
 
       const response = await axios.post(
-        `${config.baseUrl}/transfers`, // V2 endpoint
+        `${config.baseUrl}/requestTransfer`, // V1 endpoint
         payload,
         {
           headers,
@@ -654,9 +705,9 @@ class CashfreeService {
       logger.info({
         transferId: data.transferId,
         amount: data.amount,
-        referenceId: response.data?.referenceId,
+        referenceId: response.data?.data?.referenceId,
         status: response.data?.status,
-      }, '✅ Payout requested successfully with V2 API');
+      }, '✅ Payout requested successfully with V1 API');
 
       return response.data;
     }, 'requestPayout');
@@ -671,7 +722,7 @@ class CashfreeService {
       const headers = await this.getPayoutHeaders();
 
       const response = await axios.get(
-        `${config.baseUrl}/transfers/${transferId}`, // V2 endpoint - REST style path parameter
+        `${config.baseUrl}/getTransferStatus?transferId=${transferId}`, // V1 endpoint with query param
         {
           headers,
           timeout: 15000,
@@ -680,9 +731,9 @@ class CashfreeService {
 
       logger.info({
         transferId,
-        status: response.data?.transfer?.status,
-        apiVersion: 'v2',
-      }, 'Payout status retrieved with V2 API');
+        status: response.data?.data?.transfer?.status,
+        apiVersion: 'v1',
+      }, 'Payout status retrieved with V1 API');
 
       return response.data;
     }, 'getPayoutStatus');
@@ -697,7 +748,7 @@ class CashfreeService {
       const headers = await this.getPayoutHeaders();
 
       const response = await axios.get(
-        `${config.baseUrl}/balance`, // V2 endpoint
+        `${config.baseUrl}/getBalance`, // V1 endpoint
         {
           headers,
           timeout: 15000,
@@ -706,8 +757,8 @@ class CashfreeService {
 
       logger.info({
         balance: response.data?.data?.balance,
-        apiVersion: 'v2',
-      }, 'Payout balance retrieved with V2 API');
+        apiVersion: 'v1',
+      }, 'Payout balance retrieved with V1 API');
 
       return response.data;
     }, 'getPayoutBalance');
@@ -753,7 +804,7 @@ class CashfreeService {
         configured: !!payoutCfg,
         environment: payoutCfg?.isProduction ? 'PRODUCTION' : 'SANDBOX',
         baseUrl: payoutCfg?.baseUrl,
-        authMethod: 'Simplified V2 (X-Client-Id/X-Client-Secret)', // V2 uses direct header auth
+        authMethod: 'OAuth Bearer Token (V1)', // V1 uses OAuth token authentication
       },
     };
   }
