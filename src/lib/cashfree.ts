@@ -208,6 +208,7 @@ class CashfreeService {
   /**
    * Get headers for Payout API V2 calls
    * V2 uses simplified authentication - just Client ID and Secret in headers (no token needed)
+   * V2 API version is determined by the base URL, not by headers
    * Reference: https://docs.cashfree.com/reference/pgpayoutsurl
    */
   private async getPayoutHeaders() {
@@ -215,9 +216,9 @@ class CashfreeService {
 
     // V2 API uses simplified authentication with X-Client-Id and X-Client-Secret headers
     // No token generation needed - much simpler than V1!
+    // No version header needed - version is implicit in base URL
     return {
       'Content-Type': 'application/json',
-      'x-api-version': '2024-01-01', // V2 API requires version header in YYYY-MM-DD format
       'X-Client-Id': config.clientId,
       'X-Client-Secret': config.clientSecret,
     };
