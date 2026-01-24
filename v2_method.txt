@@ -1,0 +1,14 @@
+
+  /**
+   * Get headers for Payout V2 API calls
+   * V2 uses direct Client ID/Secret headers (no OAuth token needed)
+   */
+  private getPayoutHeadersV2() {
+    const config = this.initializePayoutConfig();
+    return {
+      'Content-Type': 'application/json',
+      'x-client-id': config.clientId,
+      'x-client-secret': config.clientSecret,
+      'x-api-version': '2024-01-01',
+    };
+  }
