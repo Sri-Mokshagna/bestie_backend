@@ -41,9 +41,7 @@ const RETRY_CONFIG = {
 class CashfreeService {
   private config: CashfreeConfig | null = null;
   private payoutConfig: CashfreePayoutConfig | null = null;
-  private payoutAuthToken: string | null = null;
-  private tokenExpiryTime: number | null = null;
-  // Note: Cashfree Payout V1 API uses OAuth Bearer token authentication
+  // Note: Cashfree Payout V2 API uses direct Client ID/Secret headers (no OAuth token)
 
   /**
    * Detect if credentials are for production or sandbox
@@ -113,8 +111,8 @@ class CashfreeService {
 
   /**
    * Initialize Payout API configuration
-   * Uses Cashfree Payout API V2 (v1 and v1.2 are deprecated as of 2024)
-   * Reference: https://docs.cashfree.com/reference/v2transfer
+   * Uses Cashfree Payout API V2 (standardized endpoints and responses)
+   * Reference: https://www.cashfree.com/docs/api-reference/payouts/v2/payouts-api-v2-new
    */
   private initializePayoutConfig(): CashfreePayoutConfig {
     if (!this.payoutConfig) {
@@ -135,20 +133,20 @@ class CashfreeService {
       this.payoutConfig = {
         clientId,
         clientSecret,
-        // Payout V1 API (most stable, recommended by Cashfree)
-        // Reference: https://docs.cashfree.com/docs/payout/guide/
+        // Payout V2 API (latest version with standardization)
+        // Reference: https://www.cashfree.com/docs/api-reference/payouts/v2/payouts-api-v2-new
         baseUrl: isProduction
-          ? 'https://payout-api.cashfree.com/payout/v1'
-          : 'https://payout-gamma.cashfree.com/payout/v1',
+          ? 'https://api.cashfree.com/payout'
+          : 'https://sandbox.cashfree.com/payout',
         isProduction,
       };
 
       logger.info({
         environment: isProduction ? 'PRODUCTION' : 'SANDBOX',
         baseUrl: this.payoutConfig.baseUrl,
-        apiVersion: 'v1',
+        apiVersion: 'v2',
         clientIdPrefix: clientId.substring(0, 10) + '...',
-      }, '💸 Cashfree Payout API V1 initialized');
+      }, '💸 Cashfree Payout API V2 initialized');
     }
     return this.payoutConfig;
   }
@@ -219,7 +217,7 @@ class CashfreeService {
     }
 
     const config = this.initializePayoutConfig();
-    
+
     try {
       // Request OAuth token from Cashfree V1 /authorize endpoint
       const authResponse = await axios.post(
@@ -240,12 +238,12 @@ class CashfreeService {
         // V1 tokens typically expire in 10-30 minutes
         const expiresIn = authResponse.data.data.expiry || 600; // Default to 10 mins
         this.tokenExpiryTime = Date.now() + (expiresIn - 60) * 1000; // Subtract 60s buffer
-        
+
         logger.info({
           tokenExpiresIn: expiresIn,
           tokenExpiryTime: new Date(this.tokenExpiryTime).toISOString(),
         }, '✅ Payout V1 OAuth token acquired');
-        
+
         return this.payoutAuthToken;
       } else {
         throw new Error(`OAuth token acquisition failed: ${JSON.stringify(authResponse.data)}`);
@@ -256,7 +254,7 @@ class CashfreeService {
         response: error.response?.data,
         status: error.response?.status,
       }, '❌ Failed to acquire payout OAuth token');
-      
+
       throw error;
     }
   }
@@ -268,10 +266,24 @@ class CashfreeService {
    */
   private async getPayoutHeaders() {
     const token = await this.getPayoutAuthToken();
-    
+
     return {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
+    };
+  }
+
+  /**
+   * Get headers for Payout V2 API calls
+   * V2 uses direct Client ID/Secret headers (no OAuth token needed)
+   */
+  private getPayoutHeadersV2() {
+    const config = this.initializePayoutConfig();
+    return {
+      'Content-Type': 'application/json',
+      'x-client-id': config.clientId,
+      'x-client-secret': config.clientSecret,
+      'x-api-version': '2024-01-01',
     };
   }
 
@@ -561,7 +573,7 @@ class CashfreeService {
   }) {
     return this.withRetry(async () => {
       const config = this.initializePayoutConfig();
-      const headers = await this.getPayoutHeaders();
+      const headers = this.getPayoutHeadersV2();
 
       // Clean phone number
       let phone = data.phone.replace(/\D/g, '');
@@ -569,33 +581,33 @@ class CashfreeService {
         phone = phone.substring(2);
       }
 
-      // V1 API field names (no snake_case prefixes like V2)
+      // V2 API field names (snake_case)
       const payload: any = {
-        beneId: data.beneId,
-        name: data.name.substring(0, 100),
-        email: data.email,
-        phone: phone,
-        address1: data.address1 || 'India',
+        beneficiary_id: data.beneId,
+        beneficiary_name: data.name.substring(0, 100),
+        beneficiary_email: data.email,
+        beneficiary_phone: phone,
+        address_line_1: data.address1 || 'India',
       };
 
       // Add either VPA (UPI) or bank account
       if (data.vpa) {
-        payload.vpa = data.vpa; // V1: vpa (not beneficiary_vpa)
+        payload.beneficiary_vpa = data.vpa; // V2: beneficiary_vpa
       }
       if (data.bankAccount && data.ifsc) {
-        payload.bankAccount = data.bankAccount;
-        payload.ifsc = data.ifsc;
+        payload.beneficiary_bank_account_number = data.bankAccount;
+        payload.beneficiary_ifsc = data.ifsc;
       }
 
       logger.info({
         beneId: data.beneId,
         hasVpa: !!data.vpa,
         hasBankAccount: !!data.bankAccount,
-        apiVersion: 'v1',
-      }, 'Creating beneficiary with V1 API');
+        apiVersion: 'v2',
+      }, 'Creating beneficiary with V2 API');
 
       const response = await axios.post(
-        `${config.baseUrl}/addBeneficiary`, // V1 endpoint
+        `${config.baseUrl}/beneficiaries`, // V2 endpoint
         payload,
         {
           headers,
@@ -603,7 +615,7 @@ class CashfreeService {
         }
       );
 
-      logger.info({ beneId: data.beneId }, '✅ Beneficiary created successfully with V1 API');
+      logger.info({ beneId: data.beneId }, '✅ Beneficiary created successfully with V2 API');
       return response.data;
     }, 'createBeneficiary').catch((error: any) => {
       // If beneficiary already exists, that's okay - return success
@@ -631,7 +643,7 @@ class CashfreeService {
       const headers = await this.getPayoutHeaders();
 
       const response = await axios.get(
-        `${config.baseUrl}/getBeneficiary/${beneId}`, // V1 endpoint
+        `${config.baseUrl}/beneficiaries/${beneId}`, // V2 endpoint
         {
           headers,
           timeout: 15000,
@@ -662,12 +674,12 @@ class CashfreeService {
         throw new Error('Minimum payout amount is ₹1');
       }
 
-      // V1 API field names (camelCase, not snake_case)
+      // V2 API field names (snake_case)
       const payload = {
-        beneId: data.beneId, // V1: beneId (not beneficiary_id)
-        amount: data.amount.toString(), // Cashfree expects string
-        transferId: data.transferId, // V1: transferId (not transfer_id)
-        transferMode: data.transferMode || 'upi', // V1: transferMode (not transfer_mode)
+        beneficiary_id: data.beneId, // V2: beneficiary_id
+        amount: data.amount, // V2: number (not string)
+        transfer_id: data.transferId, // V2: transfer_id
+        transfer_mode: data.transferMode || 'upi', // V2: transfer_mode
         remarks: data.remarks || 'Payout from Bestie App',
       };
 
@@ -675,12 +687,12 @@ class CashfreeService {
         transferId: data.transferId,
         amount: data.amount,
         beneId: data.beneId,
-        mode: payload.transferMode,
+        mode: payload.transfer_mode,
         apiVersion: 'v1',
-      }, '💸 Requesting payout with V1 API');
+      }, '💸 Requesting payout with V2 API');
 
       const response = await axios.post(
-        `${config.baseUrl}/requestTransfer`, // V1 endpoint
+        `${config.baseUrl}/transfers`, // V2 endpoint
         payload,
         {
           headers,
@@ -707,7 +719,7 @@ class CashfreeService {
         amount: data.amount,
         referenceId: response.data?.data?.referenceId,
         status: response.data?.status,
-      }, '✅ Payout requested successfully with V1 API');
+      }, '✅ Payout requested successfully with V2 API');
 
       return response.data;
     }, 'requestPayout');
@@ -719,10 +731,10 @@ class CashfreeService {
   async getPayoutStatus(transferId: string) {
     return this.withRetry(async () => {
       const config = this.initializePayoutConfig();
-      const headers = await this.getPayoutHeaders();
+      const headers = this.getPayoutHeadersV2();
 
       const response = await axios.get(
-        `${config.baseUrl}/getTransferStatus?transferId=${transferId}`, // V1 endpoint with query param
+        `${config.baseUrl}/transfers/${transferId}`, // V2 endpoint
         {
           headers,
           timeout: 15000,
@@ -732,8 +744,8 @@ class CashfreeService {
       logger.info({
         transferId,
         status: response.data?.data?.transfer?.status,
-        apiVersion: 'v1',
-      }, 'Payout status retrieved with V1 API');
+        apiVersion: 'v2',
+      }, 'Payout status retrieved with V2 API');
 
       return response.data;
     }, 'getPayoutStatus');
@@ -745,10 +757,10 @@ class CashfreeService {
   async getPayoutBalance() {
     return this.withRetry(async () => {
       const config = this.initializePayoutConfig();
-      const headers = await this.getPayoutHeaders();
+      const headers = this.getPayoutHeadersV2();
 
       const response = await axios.get(
-        `${config.baseUrl}/getBalance`, // V1 endpoint
+        `${config.baseUrl}/balance`, // V2 endpoint
         {
           headers,
           timeout: 15000,
@@ -757,8 +769,8 @@ class CashfreeService {
 
       logger.info({
         balance: response.data?.data?.balance,
-        apiVersion: 'v1',
-      }, 'Payout balance retrieved with V1 API');
+        apiVersion: 'v2',
+      }, 'Payout balance retrieved with V2 API');
 
       return response.data;
     }, 'getPayoutBalance');
@@ -770,7 +782,7 @@ class CashfreeService {
   async verifyVPA(vpa: string, name: string) {
     return this.withRetry(async () => {
       const config = this.initializePayoutConfig();
-      const headers = await this.getPayoutHeaders();
+      const headers = this.getPayoutHeadersV2();
 
       const response = await axios.get(
         `${config.baseUrl}/validation/upiDetails`,
