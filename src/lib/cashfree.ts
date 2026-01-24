@@ -597,6 +597,11 @@ class CashfreeService {
     amount: number;
     transferMode?: 'upi' | 'banktransfer' | 'imps' | 'neft';
     remarks?: string;
+    // V2 API requires beneficiary details in transfer request
+    beneficiaryName?: string;
+    beneficiaryEmail?: string;
+    beneficiaryPhone?: string;
+    beneficiaryVpa?: string;
   }) {
     return this.withRetry(async () => {
       const config = this.initializePayoutConfig();
@@ -607,14 +612,29 @@ class CashfreeService {
         throw new Error('Minimum payout amount is ₹1');
       }
 
-      // V2 API field names (snake_case)
-      const payload = {
+      // V2 API field names (snake_case) with beneficiary_details
+      const payload: any = {
         beneficiary_id: data.beneId, // V2: beneficiary_id
-        transfer_amount: data.amount, // V2: transfer_amount (not just 'amount')
+        transfer_amount: data.amount, // V2: transfer_amount
         transfer_id: data.transferId, // V2: transfer_id
         transfer_mode: data.transferMode || 'upi', // V2: transfer_mode
         remarks: data.remarks || 'Payout from Bestie App',
       };
+
+      // V2 requires beneficiary_details object
+      if (data.beneficiaryName || data.beneficiaryEmail || data.beneficiaryPhone) {
+        payload.beneficiary_details = {
+          beneficiary_name: data.beneficiaryName || 'Responder',
+          beneficiary_email: data.beneficiaryEmail || `${data.beneId}@bestie.app`,
+          beneficiary_phone: data.beneficiaryPhone || '9999999999',
+        };
+
+        // Add VPA if it's a UPI transfer
+        if (data.beneficiaryVpa && data.transferMode === 'upi') {
+          payload.beneficiary_details.beneficiary_vpa = data.beneficiaryVpa;
+        }
+      }
+
 
       logger.info({
         transferId: data.transferId,
