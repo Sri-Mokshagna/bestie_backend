@@ -531,10 +531,11 @@ export const getAllPayouts = asyncHandler(async (req: AuthRequest, res: Response
   res.json({
     payouts: payouts.map((p: any) => ({
       id: p._id,
-      responderId: p.responderId._id,
-      responderUserId: p.responderId.userId?._id,
-      responderName: p.responderId.userId?.profile?.name || 'Unknown',
-      responderPhone: p.responderId.userId?.phone,
+      // Defensive: Handle case where responder was deleted
+      responderId: p.responderId?._id || null,
+      responderUserId: p.responderId?.userId?._id || null,
+      responderName: p.responderId?.userId?.profile?.name || 'Deleted Responder',
+      responderPhone: p.responderId?.userId?.phone || 'N/A',
       coins: p.coins,
       amountINR: p.amountINR,
       upiId: p.upiId,
