@@ -240,6 +240,37 @@ export const callService = {
       throw new AppError(403, 'Not authorized');
     }
 
+    // 🔥 IDEMPOTENCY FIX: If call is already ACTIVE, just re-emit the connected event
+    // This handles the case where both parties call confirmCallConnection()
+    // Second caller should still receive the call_connected event with timing info
+    if (call.status === CallStatus.ACTIVE && call.startTime && call.maxDurationSeconds) {
+      logger.info(
+        {
+          callId: String(call._id),
+          userId,
+          status: call.status,
+        },
+        '🔄 Call already active - re-emitting call_connected (idempotent retry)'
+      );
+
+      const startTimeMs = call.startTime.getTime();
+
+      // Always emit to BOTH parties (ensure both have the timing info)
+      emitToUser(call.userId.toString(), 'call_connected', {
+        callId: String(call._id),
+        maxDuration: call.maxDurationSeconds,
+        startTimeMs,
+      });
+      emitToUser(call.responderId.toString(), 'call_connected', {
+        callId: String(call._id),
+        maxDuration: call.maxDurationSeconds,
+        startTimeMs,
+      });
+
+      return call;
+    }
+
+    // Normal flow - call must be in CONNECTING state for first-time activation
     if (call.status !== CallStatus.CONNECTING) {
       throw new AppError(400, 'Call is not in connecting state');
     }
@@ -264,9 +295,30 @@ export const callService = {
     // Update call status to ACTIVE and set calculated times
     call.status = CallStatus.ACTIVE;
     call.startTime = new Date();
+
+    // DEFENSIVE: Ensure startTime was actually set (race condition protection)
+    if (!call.startTime) {
+      logger.error(
+        { callId: String(call._id) },
+        '🚨 CRITICAL: startTime is null after assignment - forcing re-assignment'
+      );
+      call.startTime = new Date(); // Force re-assignment
+    }
+
     call.scheduledEndTime = new Date(call.startTime.getTime() + (maxDurationSeconds * 1000));
     call.maxDurationSeconds = maxDurationSeconds;
     call.initialCoinBalance = user.coinBalance;
+
+    logger.info(
+      {
+        callId: String(call._id),
+        startTime: call.startTime,
+        scheduledEndTime: call.scheduledEndTime,
+        maxDurationSeconds,
+      },
+      '✅ Call activated with timing'
+    );
+
     await call.save();
 
     // Set inCall flag for responder in both User and Responder models
@@ -338,19 +390,34 @@ export const callService = {
 
   // Calculate actual duration and deduct proportional coins
   async endCallAndDeductCoins(call: any) {
-    // Calculate actual duration
+    // DEFENSIVE: Use createdAt as fallback if startTime is missing (race condition safety)
     if (!call.startTime) {
-      call.status = CallStatus.ENDED;
-      call.endTime = new Date();
-      call.durationSeconds = 0;
-      call.coinsCharged = 0;
-      await call.save();
-      return;
+      logger.warn(
+        {
+          callId: String(call._id),
+          status: call.status,
+          createdAt: call.createdAt,
+        },
+        '⚠️ Missing startTime - using createdAt as fallback (likely race condition)'
+      );
+      // Use createdAt as fallback - ensures duration is always calculated
+      call.startTime = call.createdAt;
     }
 
     const endTime = new Date();
     const durationMs = endTime.getTime() - call.startTime.getTime();
     const durationSeconds = Math.floor(durationMs / 1000);
+
+    logger.info(
+      {
+        callId: String(call._id),
+        startTime: call.startTime,
+        endTime,
+        durationMs,
+        durationSeconds,
+      },
+      '⏱️ Call duration calculated'
+    );
 
     // Calculate coins to deduct based on actual duration
     const callType = call.type === CallType.AUDIO ? 'audio' : 'video';
@@ -749,16 +816,41 @@ export const callService = {
       await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
     }
 
-    // Find old active calls to mark as ended
+    // 🔥 FIX: Find active calls that exceeded their scheduled end time
+    // Don't use startTime - that would end long valid calls!
     const activeCalls = await Call.find({
       status: CallStatus.ACTIVE,
-      startTime: { $lt: sixtySecondsAgo },
+      scheduledEndTime: { $lt: now }, // Use scheduled end time, not start time
     });
 
-    // Mark old active calls as ended and reset inCall flags
+    logger.info(
+      {
+        ringingCallsFound: ringingCalls.length,
+        activeCallsFound: activeCalls.length,
+      },
+      'Cleanup: checking stale calls'
+    );
+
+    // Mark calls that exceeded their time limit as ended
     for (const call of activeCalls) {
+      logger.warn(
+        {
+          callId: String(call._id),
+          startTime: call.startTime,
+          scheduledEndTime: call.scheduledEndTime,
+        },
+        'Ending call that exceeded scheduled end time'
+      );
+
       call.status = CallStatus.ENDED;
       call.endTime = now;
+
+      // Calculate actual duration for billing
+      if (call.startTime) {
+        const durationMs = now.getTime() - call.startTime.getTime();
+        call.durationSeconds = Math.floor(durationMs / 1000);
+      }
+
       await call.save();
 
       // Reset inCall flag for responder
