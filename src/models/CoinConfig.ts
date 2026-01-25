@@ -42,19 +42,19 @@ const coinConfigSchema = new Schema<ICoinConfig>(
       type: Number,
       required: true,
       min: 0,
-      default: 3,
+      default: 2, // Changed from 3 to 2
     },
     audioCallCoinsPerMinute: {
       type: Number,
       required: true,
       min: 0,
-      default: 10,
+      default: 10, // Remains 10
     },
     videoCallCoinsPerMinute: {
       type: Number,
       required: true,
       min: 0,
-      default: 60,
+      default: 50, // Changed from 60 to 50
     },
     initialUserCoins: {
       type: Number,

@@ -48,14 +48,20 @@ export class PaymentService {
       // Generate email (use user's email or generate from phone)
       const customerEmail = user.profile?.email || `user_${user.phone.replace(/\+/g, '')}@bestie.app`;
 
+      // Calculate actual amount after discount
+      const hasDiscount = plan.discount && plan.discount > 0;
+      const actualAmount = hasDiscount
+        ? Math.round(plan.priceINR * (100 - plan.discount) / 100)
+        : plan.priceINR;
+
       // Create payment record in database
       const payment = new Payment({
         userId: new Types.ObjectId(userId),
         orderId,
         cashfreeOrderId: orderId, // Will be updated with Cashfree's order ID
         planId: new Types.ObjectId(planId),
-        amount: plan.priceINR,
-        coins: plan.coins,
+        amount: actualAmount, // Use discounted amount for payment gateway
+        coins: plan.coins, // Store original plan coins for calculation
         currency: 'INR',
         status: PaymentStatus.PENDING,
       });
@@ -80,7 +86,7 @@ export class PaymentService {
       // return_url must be CLEAN - no query params, Cashfree injects order_id
       const result = await cashfreeService.createOrderAndGetLink({
         orderId,
-        amount: plan.priceINR,
+        amount: actualAmount, // Use discounted amount
         currency: 'INR',
         customerDetails: {
           customerId: userId,
@@ -113,9 +119,11 @@ export class PaymentService {
       return {
         orderId,
         paymentSessionId: result.payment_session_id,
-        amount: plan.priceINR,
+        amount: actualAmount, // Return actual amount being charged
         coins: plan.coins,
         planName: plan.name,
+        discount: plan.discount,
+        originalAmount: plan.priceINR,
         payment_link: result.payment_link, // SDK-based redirect (required by Cashfree)
       };
     } catch (error) {
@@ -237,41 +245,45 @@ export class PaymentService {
           orderId: payment.orderId,
           amountPaid: payment.amount,
         },
-        '💰 Status saved, now calculating coins to credit'
+        '💰 Status saved, now crediting coins'
       );
 
-      // Get config to calculate coins based on coinsToINRRate
-      const config = await coinService.getConfig();
+      // Get the original plan to credit full coins despite discount
+      const plan = await CoinPlan.findById(payment.planId);
 
-      // IMPORTANT: Calculate actual coins based on amount paid and admin's rate
-      // This respects the admin's coinsToINRRate setting
-      // Example: ₹100 paid with rate 0.1 (₹0.1 per coin) = 1000 coins
-      const coinsToCredit = Math.floor(payment.amount / config.coinsToINRRate);
+      if (!plan) {
+        throw new Error('Plan not found for payment');
+      }
+
+      // CRITICAL: Use plan.coins (original amount) NOT discounted amount
+      // Example: Plan costs ₹21 for 50 coins with 50% off = user pays ₹11 but gets 50 coins
+      const coinsToCredit = plan.coins;
 
       logger.info(
         {
           userId: payment.userId,
           orderId: payment.orderId,
           amountPaid: payment.amount,
-          coinsToINRRate: config.coinsToINRRate,
-          originalPlanCoins: payment.coins,
-          calculatedCoins: coinsToCredit,
-          calculation: `${payment.amount} / ${config.coinsToINRRate} = ${coinsToCredit}`,
+          originalPlanPrice: plan.priceINR,
+          planCoins: plan.coins,
+          discount: plan.discount,
+          coinsToCredit,
         },
-        '🔢 Coins calculated based on coinsToINRRate (admin setting)'
+        '🔢 Crediting full plan coins regardless of discount'
       );
 
-      // Credit the calculated coins (not the plan's fixed coins)
+      // Credit the plan's full coins
       await coinService.creditCoins(
         payment.userId.toString(),
-        coinsToCredit, // Use calculated coins based on rate
+        coinsToCredit,
         TransactionType.PURCHASE,
         {
           orderId: payment.orderId,
           description: `Coin purchase - Order ${payment.orderId}`,
           amountPaid: payment.amount,
-          coinsToINRRate: config.coinsToINRRate,
-          calculatedCoins: coinsToCredit,
+          originalPrice: plan.priceINR,
+          discount: plan.discount,
+          planCoins: plan.coins,
         }
       );
 
@@ -281,7 +293,7 @@ export class PaymentService {
           orderId: payment.orderId,
           coinsCredited: coinsToCredit,
         },
-        '✅ Coins credited successfully (calculated amount)'
+        '✅ Coins credited successfully'
       );
 
       // FIRST-TIME BONUS LOGIC

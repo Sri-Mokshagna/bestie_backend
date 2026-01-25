@@ -42,9 +42,9 @@ export class CoinService {
     if (!config) {
       logger.warn('No active coin config found, creating default');
       config = await CoinConfig.create({
-        chatCoinsPerMessage: 3,
+        chatCoinsPerMessage: 2, // Changed from 3
         audioCallCoinsPerMinute: 10,
-        videoCallCoinsPerMinute: 60,
+        videoCallCoinsPerMinute: 50, // Changed from 60
         initialUserCoins: 10,
         responderMinRedeemCoins: 5,
         responderCommissionPercentage: 70,
