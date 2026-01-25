@@ -26,22 +26,22 @@ export const getEarnings = asyncHandler(async (req: AuthRequest, res: Response) 
 
   const redemptionInfo = await coinService.canRedeem(req.user.id);
 
-  // Convert coins to rupees using commission rate
-  const totalRupees = await coinService.calculateRedemptionAmount(responder.earnings.totalCoins);
-  const pendingRupees = await coinService.calculateRedemptionAmount(responder.earnings.pendingCoins);
-  const redeemedRupees = await coinService.calculateRedemptionAmount(responder.earnings.redeemedCoins);
-  const minRequiredRupees = await coinService.calculateRedemptionAmount(redemptionInfo.minRequired);
+  // Convert coins to rupees using commission rate and round to integers
+  const totalRupees = Math.round(await coinService.calculateRedemptionAmount(responder.earnings.totalCoins));
+  const pendingRupees = Math.round(await coinService.calculateRedemptionAmount(responder.earnings.pendingCoins));
+  const redeemedRupees = Math.round(await coinService.calculateRedemptionAmount(responder.earnings.redeemedCoins));
+  const minRequiredRupees = Math.round(await coinService.calculateRedemptionAmount(redemptionInfo.minRequired));
 
   res.json({
     earnings: {
-      totalCoins: totalRupees, // Return rupees, keep key name for compatibility
-      pendingCoins: pendingRupees, // Return rupees, keep key name for compatibility
-      redeemedCoins: redeemedRupees, // Return rupees, keep key name for compatibility
+      totalCoins: totalRupees, // Return rounded rupees as integer
+      pendingCoins: pendingRupees, // Return rounded rupees as integer
+      redeemedCoins: redeemedRupees, // Return rounded rupees as integer
     },
     upiId: responder.upiId,
     redemption: {
       canRedeem: redemptionInfo.canRedeem,
-      minRequired: minRequiredRupees, // Return rupees
+      minRequired: minRequiredRupees, // Return rounded rupees as integer
       amountINR: pendingRupees, // This was already correct
     },
   });
