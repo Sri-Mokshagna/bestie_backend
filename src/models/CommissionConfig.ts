@@ -5,6 +5,7 @@ export interface ICommissionConfig extends Document {
   adminCommissionPercentage: number;
   coinToINRRate: number; // How much 1 coin is worth in INR for redemption
   minimumRedemptionCoins: number;
+  firstTimeBonusPercentage: number; // Bonus percentage for first-time purchases on tagged plans
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -37,6 +38,13 @@ const commissionConfigSchema = new Schema<ICommissionConfig>(
       required: true,
       min: 1,
       default: 100,
+    },
+    firstTimeBonusPercentage: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 100,
+      default: 10, // 10% bonus on first-time purchases
     },
     isActive: {
       type: Boolean,

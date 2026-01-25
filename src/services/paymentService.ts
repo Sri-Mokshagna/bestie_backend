@@ -283,6 +283,81 @@ export class PaymentService {
         },
         '✅ Coins credited successfully (calculated amount)'
       );
+
+      // FIRST-TIME BONUS LOGIC
+      // Check if plan is tagged as "first-time" and user qualifies for bonus
+      const plan = await CoinPlan.findById(payment.planId);
+      if (plan && plan.tags.includes(('first-time' as any))) {
+        logger.info(
+          {
+            userId: payment.userId,
+            orderId: payment.orderId,
+            planId: payment.planId,
+            planTags: plan.tags,
+          },
+          '🏷️ Plan has first-time tag, checking if user qualifies for bonus'
+        );
+
+        // Check if user has had any previous successful payments
+        const previousSuccessfulPayments = await Payment.countDocuments({
+          userId: payment.userId,
+          status: PaymentStatus.SUCCESS,
+          _id: { $ne: payment._id }, // Exclude current payment
+        });
+
+        if (previousSuccessfulPayments === 0) {
+          // This is the user's first successful purchase!
+          // Get bonus percentage from commission config
+          const { commissionService } = await import('./commissionService');
+          const bonusPercentage = await commissionService.getFirstTimeBonusPercentage();
+          const bonusCoins = Math.floor((coinsToCredit * bonusPercentage) / 100);
+
+          if (bonusCoins > 0) {
+            logger.info(
+              {
+                userId: payment.userId,
+                orderId: payment.orderId,
+                baseCoins: coinsToCredit,
+                bonusPercentage,
+                bonusCoins,
+              },
+              '🎉 First-time purchase bonus - crediting extra coins'
+            );
+
+            // Credit bonus coins
+            await coinService.creditCoins(
+              payment.userId.toString(),
+              bonusCoins,
+              TransactionType.GIFT,
+              {
+                orderId: payment.orderId,
+                description: `First-time purchase bonus (${bonusPercentage}%)`,
+                bonusPercentage,
+                baseCoins: coinsToCredit,
+              }
+            );
+
+            logger.info(
+              {
+                userId: payment.userId,
+                orderId: payment.orderId,
+                bonusCredited: bonusCoins,
+                totalCoins: coinsToCredit + bonusCoins,
+              },
+              '✅ First-time bonus credited successfully'
+            );
+          }
+        } else {
+          logger.info(
+            {
+              userId: payment.userId,
+              orderId: payment.orderId,
+              previousSuccessfulPayments,
+            },
+            '⚠️ User has previous successful payments - not eligible for first-time bonus'
+          );
+        }
+      }
     } catch (error) {
       logger.error({ error, orderId: payment.orderId }, 'Failed to process successful payment');
       payment.status = PaymentStatus.FAILED;

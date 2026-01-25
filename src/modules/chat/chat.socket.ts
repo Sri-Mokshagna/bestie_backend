@@ -116,7 +116,7 @@ export function initializeChatSocket(io: SocketServer) {
         // CRITICAL: Validate authentication
         if (!socket.userId) {
           logger.error({ msg: 'Send message: Not authenticated' });
-          if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
+          // Silently fail - don't show "unauthorized" to user, let them retry
           return;
         }
 

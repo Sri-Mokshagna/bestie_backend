@@ -433,7 +433,10 @@ export class CoinService {
    * Check if responder can redeem coins
    */
   async canRedeem(responderId: string): Promise<{ canRedeem: boolean; pendingCoins: number; minRequired: number }> {
-    const config = await this.getConfig();
+    // Get minimum redemption from CommissionConfig (admin-controlled)
+    const { commissionService } = await import('./commissionService');
+    const minRequired = await commissionService.getMinimumRedemptionCoins();
+
     const responder = await Responder.findOne({ userId: responderId });
 
     if (!responder) {
@@ -441,9 +444,9 @@ export class CoinService {
     }
 
     return {
-      canRedeem: responder.earnings.pendingCoins >= config.responderMinRedeemCoins,
+      canRedeem: responder.earnings.pendingCoins >= minRequired,
       pendingCoins: responder.earnings.pendingCoins,
-      minRequired: config.responderMinRedeemCoins,
+      minRequired: minRequired,
     };
   }
 
@@ -451,8 +454,10 @@ export class CoinService {
    * Calculate INR amount for coin redemption
    */
   async calculateRedemptionAmount(coins: number): Promise<number> {
-    const config = await this.getConfig();
-    return coins * config.coinsToINRRate;
+    // Use CommissionConfig for redemption rate (admin-controlled)
+    const { commissionService } = await import('./commissionService');
+    const rate = await commissionService.getCoinToINRRate();
+    return coins * rate;
   }
 
   /**

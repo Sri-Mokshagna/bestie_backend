@@ -11,7 +11,7 @@ class CommissionService {
   private configCacheTime: number = 0;
   private readonly CACHE_TTL = 300000; // 5 minute cache (config rarely changes)
 
-  private constructor() {}
+  private constructor() { }
 
   static getInstance(): CommissionService {
     if (!CommissionService.instance) {
@@ -39,6 +39,7 @@ class CommissionService {
         adminCommissionPercentage: 40,
         coinToINRRate: 0.1,
         minimumRedemptionCoins: 100,
+        firstTimeBonusPercentage: 10,
         isActive: true,
       });
       config = newConfig.toObject();
@@ -74,12 +75,20 @@ class CommissionService {
   }
 
   /**
+   * Get first-time bonus percentage
+   */
+  async getFirstTimeBonusPercentage(): Promise<number> {
+    const config = await this.getConfig();
+    return config.firstTimeBonusPercentage;
+  }
+
+  /**
    * Clear config cache (call after admin updates)
    */
   clearConfigCache() {
     this.cachedConfig = null;
     this.configCacheTime = 0;
-    logger.info('Commission config cache cleared');
+    logger.info('Commission config cache cache cleared');
   }
 }
 
