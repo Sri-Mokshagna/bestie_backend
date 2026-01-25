@@ -25,21 +25,24 @@ export const getEarnings = asyncHandler(async (req: AuthRequest, res: Response) 
   }
 
   const redemptionInfo = await coinService.canRedeem(req.user.id);
-  const redemptionAmount = await coinService.calculateRedemptionAmount(
-    responder.earnings.pendingCoins
-  );
+
+  // Convert coins to rupees using commission rate
+  const totalRupees = await coinService.calculateRedemptionAmount(responder.earnings.totalCoins);
+  const pendingRupees = await coinService.calculateRedemptionAmount(responder.earnings.pendingCoins);
+  const redeemedRupees = await coinService.calculateRedemptionAmount(responder.earnings.redeemedCoins);
+  const minRequiredRupees = await coinService.calculateRedemptionAmount(redemptionInfo.minRequired);
 
   res.json({
     earnings: {
-      totalCoins: responder.earnings.totalCoins,
-      pendingCoins: responder.earnings.pendingCoins,
-      redeemedCoins: responder.earnings.redeemedCoins,
+      totalCoins: totalRupees, // Return rupees, keep key name for compatibility
+      pendingCoins: pendingRupees, // Return rupees, keep key name for compatibility
+      redeemedCoins: redeemedRupees, // Return rupees, keep key name for compatibility
     },
     upiId: responder.upiId,
     redemption: {
       canRedeem: redemptionInfo.canRedeem,
-      minRequired: redemptionInfo.minRequired,
-      amountINR: redemptionAmount,
+      minRequired: minRequiredRupees, // Return rupees
+      amountINR: pendingRupees, // This was already correct
     },
   });
 });
