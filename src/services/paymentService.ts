@@ -298,7 +298,7 @@ export class PaymentService {
 
       // FIRST-TIME BONUS LOGIC
       // Check if plan is tagged as "first-time" and user qualifies for bonus
-      const plan = await CoinPlan.findById(payment.planId);
+      // Note: plan variable already fetched above, reusing it here
       if (plan && plan.tags.includes(('first-time' as any))) {
         logger.info(
           {
