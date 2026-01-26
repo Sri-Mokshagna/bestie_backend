@@ -760,9 +760,17 @@ export const callService = {
       callCount: calls.length,
     }, 'Call history retrieved with batch lookup');
 
+    // Get commission config for responder earnings calculation
+    const { commissionService } = await import('../../services/commissionService');
+    const [responderPercentage, coinToINRRate] = await Promise.all([
+      commissionService.getResponderPercentage(),
+      commissionService.getCoinToINRRate(),
+    ]);
+
     // Format calls with user data from map
-    // NOTE: Keep coins as coins for user call history (don't convert to rupees)
-    // Rupee conversion is only for responder earnings, not user charges
+    // NOTE: Different display for users vs responders:
+    // - Users see COINS charged (e.g., 10 coins)
+    // - Responders see RUPEES earned (e.g., ₹3 after commission)
     return calls.map(call => {
       const userIdStr = call.userId.toString();
       const responderIdStr = call.responderId.toString();
@@ -773,6 +781,19 @@ export const callService = {
       // Extract user info
       const userName = userDoc?.profile?.name?.trim() || userDoc?.phone || 'User';
       const responderName = responderDoc?.profile?.name?.trim() || responderDoc?.phone || 'Responder';
+
+      // Calculate display value based on who's viewing
+      let displayValue: number;
+      if (userId === responderIdStr) {
+        // Responder viewing: show their earnings in rupees
+        // 1. Convert coins to rupees: coinsCharged × coinToINRRate
+        // 2. Apply commission: totalRupees × responderPercentage
+        const totalRupees = (call.coinsCharged || 0) * coinToINRRate;
+        displayValue = Math.round(totalRupees * (responderPercentage / 100));
+      } else {
+        // User viewing: show coins charged
+        displayValue = call.coinsCharged || 0;
+      }
 
       return {
         id: String(call._id),
@@ -795,7 +816,7 @@ export const callService = {
         startTime: call.startTime,
         endTime: call.endTime,
         duration: call.durationSeconds || 0,
-        coinsCharged: call.coinsCharged || 0, // Return actual coins charged to user
+        coinsCharged: displayValue, // Coins for users, Rupees for responders
         createdAt: call.createdAt,
       };
     });
