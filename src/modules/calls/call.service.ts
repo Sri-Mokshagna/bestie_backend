@@ -429,81 +429,92 @@ export const callService = {
       '⏱️ Call duration calculated'
     );
 
-    // Calculate coins to deduct based on actual duration
-    const callType = call.type === CallType.AUDIO ? 'audio' : 'video';
-    const rate = await coinService.getCallRate(callType);
+    // CRITICAL: Only deduct coins if call was ACTIVE
+    // If call was ringing/connecting/cancelled, no coins should be charged
+    const wasCallActive = call.status === CallStatus.ACTIVE || call.status === CallStatus.ENDED;
 
-    // rate is coins per minute, calculate proportional coins for actual duration
-    const coinsToDeduct = Math.ceil((durationSeconds / 60) * rate);
+    if (!wasCallActive) {
+      logger.info(
+        { callId: String(call._id), status: call.status },
+        '✅ Call never became active (still ringing/connecting), NO COINS CHARGED'
+      );
+    } else {
+      // Calculate coins to deduct based on actual duration
+      const callType = call.type === CallType.AUDIO ? 'audio' : 'video';
+      const rate = await coinService.getCallRate(callType);
 
-    // Deduct coins from user
-    const user = await User.findById(call.userId);
-    if (user) {
-      const actualDeduction = Math.min(coinsToDeduct, user.coinBalance);
-      user.coinBalance -= actualDeduction;
-      await user.save();
+      // rate is coins per minute, calculate proportional coins for actual duration
+      const coinsToDeduct = Math.ceil((durationSeconds / 60) * rate);
 
-      // Get commission config (cached)
-      const responderPercentage = await commissionService.getResponderPercentage();
+      // Deduct coins from user
+      const user = await User.findById(call.userId);
+      if (user) {
+        const actualDeduction = Math.min(coinsToDeduct, user.coinBalance);
+        user.coinBalance -= actualDeduction;
+        await user.save();
 
-      // Calculate responder earnings in COINS first
-      // Use Math.round() instead of Math.floor() for fairer distribution with small amounts
-      // Example: 2 coins × 30% = 0.6 → rounds to 1 coin (instead of 0)
-      const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
+        // Get commission config (cached)
+        const responderPercentage = await commissionService.getResponderPercentage();
 
-      // FIX 5: Convert coins to rupees before storing
-      const coinToINRRate = await commissionService.getCoinToINRRate();
-      const responderRupees = Math.round(responderCoins * coinToINRRate);
+        // Calculate responder earnings in COINS first
+        // Use Math.round() instead of Math.floor() for fairer distribution with small amounts
+        // Example: 2 coins × 30% = 0.6 → rounds to 1 coin (instead of 0)
+        const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
 
-      // Credit responder (NOW IN RUPEES, NOT COINS)
-      let responder = await Responder.findOne({ userId: call.responderId });
-      if (!responder) {
-        // Create responder record if doesn't exist
-        responder = await Responder.create({
-          userId: call.responderId,
-          earnings: {
-            totalRupees: responderRupees,
-            pendingRupees: responderRupees,
-            lockedRupees: 0,
-            redeemedRupees: 0,
+        // FIX 5: Convert coins to rupees before storing
+        const coinToINRRate = await commissionService.getCoinToINRRate();
+        const responderRupees = Math.round(responderCoins * coinToINRRate);
+
+        // Credit responder (NOW IN RUPEES, NOT COINS)
+        let responder = await Responder.findOne({ userId: call.responderId });
+        if (!responder) {
+          // Create responder record if doesn't exist
+          responder = await Responder.create({
+            userId: call.responderId,
+            earnings: {
+              totalRupees: responderRupees,
+              pendingRupees: responderRupees,
+              lockedRupees: 0,
+              redeemedRupees: 0,
+            },
+          });
+        } else {
+          responder.earnings.totalRupees += responderRupees;
+          responder.earnings.pendingRupees += responderRupees;
+          await responder.save();
+        }
+
+        // Create transaction record for user
+        await Transaction.create([
+          {
+            userId: call.userId,
+            responderId: call.responderId,
+            coins: actualDeduction,
+            type: TransactionType.CALL,
+            status: TransactionStatus.COMPLETED,
+            meta: {
+              callId: String(call._id),
+              callType: call.type,
+              durationSeconds,
+              description: `${call.type} call - ${durationSeconds}s`,
+            },
           },
-        });
-      } else {
-        responder.earnings.totalRupees += responderRupees;
-        responder.earnings.pendingRupees += responderRupees;
-        await responder.save();
+        ]);
+
+        call.coinsCharged = actualDeduction;
+
+        logger.info({
+          callId: String(call._id),
+          durationSeconds,
+          coinsDeducted: actualDeduction,
+          responderEarnedCoins: responderCoins,
+          responderEarnedRupees: responderRupees, // Now logging rupees
+          commissionRate: responderPercentage,
+          coinToINRRate,
+          userBalance: user.coinBalance,
+          responderPendingRupees: responder.earnings.pendingRupees,
+        }, 'Coins deducted for call and responder credited in RUPEES');
       }
-
-      // Create transaction record for user
-      await Transaction.create([
-        {
-          userId: call.userId,
-          responderId: call.responderId,
-          coins: actualDeduction,
-          type: TransactionType.CALL,
-          status: TransactionStatus.COMPLETED,
-          meta: {
-            callId: String(call._id),
-            callType: call.type,
-            durationSeconds,
-            description: `${call.type} call - ${durationSeconds}s`,
-          },
-        },
-      ]);
-
-      call.coinsCharged = actualDeduction;
-
-      logger.info({
-        callId: String(call._id),
-        durationSeconds,
-        coinsDeducted: actualDeduction,
-        responderEarnedCoins: responderCoins,
-        responderEarnedRupees: responderRupees, // Now logging rupees
-        commissionRate: responderPercentage,
-        coinToINRRate,
-        userBalance: user.coinBalance,
-        responderPendingRupees: responder.earnings.pendingRupees,
-      }, 'Coins deducted for call and responder credited in RUPEES');
     }
 
     // Update call
