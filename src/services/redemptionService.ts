@@ -27,9 +27,9 @@ export class RedemptionService {
         throw new AppError(400, `Minimum redemption amount is ${config.minimumRedemptionCoins} coins`);
       }
 
-      // Check if responder has enough pending coins
-      if (responder.earnings.pendingCoins < coinsToRedeem) {
-        throw new AppError(400, 'Insufficient pending coins for redemption');
+      // Check if responder has enough pending rupees
+      if (responder.earnings.pendingRupees < coinsToRedeem) {
+        throw new AppError(400, 'Insufficient pending rupees for redemption');
       }
 
       // Validate UPI ID format (basic validation)
@@ -61,23 +61,23 @@ export class RedemptionService {
 
       await redemption.save();
 
-      // Update responder's pending coins (move to locked state)
+      // Update responder's pending rupees (move to locked state)
       await Responder.findOneAndUpdate(
         { userId },
-        { 
-          $inc: { 
-            'earnings.pendingCoins': -coinsToRedeem,
-            'earnings.lockedCoins': coinsToRedeem 
-          } 
+        {
+          $inc: {
+            'earnings.pendingRupees': -coinsToRedeem,
+            'earnings.lockedRupees': coinsToRedeem
+          }
         }
       );
 
       logger.info(
-        { 
-          userId, 
-          redemptionId: redemption._id, 
-          coinsToRedeem, 
-          amountINR 
+        {
+          userId,
+          redemptionId: redemption._id,
+          coinsToRedeem,
+          amountINR
         },
         'Redemption request created'
       );
@@ -92,7 +92,7 @@ export class RedemptionService {
   async getRedemptionRequests(userId: string, page = 1, limit = 10) {
     try {
       const skip = (page - 1) * limit;
-      
+
       const redemptions = await Redemption.find({ userId })
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -125,7 +125,7 @@ export class RedemptionService {
     try {
       const skip = (page - 1) * limit;
       const filter: any = {};
-      
+
       if (status) {
         filter.status = status;
       }
@@ -169,18 +169,18 @@ export class RedemptionService {
       }
 
       // Validate status transition
-      if (redemption.status === RedemptionStatus.COMPLETED || 
-          redemption.status === RedemptionStatus.REJECTED) {
+      if (redemption.status === RedemptionStatus.COMPLETED ||
+        redemption.status === RedemptionStatus.REJECTED) {
         throw new AppError(400, 'Cannot update completed or rejected redemption');
       }
 
       const oldStatus = redemption.status;
-      
+
       // Update redemption
       redemption.status = status;
       redemption.processedBy = new Types.ObjectId(adminId);
       redemption.processedAt = new Date();
-      
+
       if (notes) redemption.adminNotes = notes;
       if (transactionId) redemption.transactionId = transactionId;
       if (rejectionReason) redemption.rejectionReason = rejectionReason;
@@ -191,11 +191,11 @@ export class RedemptionService {
       await this.handleStatusChange(redemption, oldStatus);
 
       logger.info(
-        { 
-          redemptionId, 
-          oldStatus, 
-          newStatus: status, 
-          adminId 
+        {
+          redemptionId,
+          oldStatus,
+          newStatus: status,
+          adminId
         },
         'Redemption status updated'
       );
@@ -215,27 +215,27 @@ export class RedemptionService {
 
     switch (redemption.status) {
       case RedemptionStatus.APPROVED:
-        // Move coins from locked to redeemed
+        // Move rupees from locked to redeemed
         await Responder.findOneAndUpdate(
           { userId: redemption.userId },
-          { 
-            $inc: { 
-              'earnings.lockedCoins': -redemption.coinsToRedeem,
-              'earnings.redeemedCoins': redemption.coinsToRedeem 
-            } 
+          {
+            $inc: {
+              'earnings.lockedRupees': -redemption.coinsToRedeem,
+              'earnings.redeemedRupees': redemption.coinsToRedeem
+            }
           }
         );
         break;
 
       case RedemptionStatus.REJECTED:
-        // Move coins back to pending
+        // Move rupees back to pending
         await Responder.findOneAndUpdate(
           { userId: redemption.userId },
-          { 
-            $inc: { 
-              'earnings.lockedCoins': -redemption.coinsToRedeem,
-              'earnings.pendingCoins': redemption.coinsToRedeem 
-            } 
+          {
+            $inc: {
+              'earnings.lockedRupees': -redemption.coinsToRedeem,
+              'earnings.pendingRupees': redemption.coinsToRedeem
+            }
           }
         );
         break;

@@ -22,19 +22,19 @@ export const getResponderBalance = asyncHandler(async (req: AuthRequest, res: Re
         responder = await Responder.create({
             userId: req.user.id,
             earnings: {
-                totalCoins: 0,
-                pendingCoins: 0,
-                lockedCoins: 0,
-                redeemedCoins: 0,
+                totalRupees: 0,
+                pendingRupees: 0,
+                lockedRupees: 0,
+                redeemedRupees: 0,
             },
         });
     }
 
     res.json({
-        totalEarnings: responder.earnings.totalCoins,
-        availableForRedemption: responder.earnings.pendingCoins,
-        locked: responder.earnings.lockedCoins,
-        redeemed: responder.earnings.redeemedCoins,
+        totalEarnings: responder.earnings.totalRupees,
+        availableForRedemption: responder.earnings.pendingRupees,
+        locked: responder.earnings.lockedRupees,
+        redeemed: responder.earnings.redeemedRupees,
     });
 });
 

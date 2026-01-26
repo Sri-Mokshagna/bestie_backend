@@ -444,8 +444,8 @@ export class CoinService {
     }
 
     return {
-      canRedeem: responder.earnings.pendingCoins >= minRequired,
-      pendingCoins: responder.earnings.pendingCoins,
+      canRedeem: responder.earnings.pendingRupees >= minRequired,
+      pendingCoins: responder.earnings.pendingRupees, // Return rupees (keeping field name for compatibility)
       minRequired: minRequired,
     };
   }
