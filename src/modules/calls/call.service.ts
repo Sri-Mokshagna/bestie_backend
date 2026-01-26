@@ -758,11 +758,9 @@ export const callService = {
       callCount: calls.length,
     }, 'Call history retrieved with batch lookup');
 
-    // Get commission rate for coin to rupee conversion
-    const { commissionService } = await import('../../services/commissionService');
-    const coinToINRRate = await commissionService.getCoinToINRRate();
-
-    // Format calls with user data from map and convert coins to rupees
+    // Format calls with user data from map
+    // NOTE: Keep coins as coins for user call history (don't convert to rupees)
+    // Rupee conversion is only for responder earnings, not user charges
     return calls.map(call => {
       const userIdStr = call.userId.toString();
       const responderIdStr = call.responderId.toString();
@@ -773,9 +771,6 @@ export const callService = {
       // Extract user info
       const userName = userDoc?.profile?.name?.trim() || userDoc?.phone || 'User';
       const responderName = responderDoc?.profile?.name?.trim() || responderDoc?.phone || 'Responder';
-
-      // Convert coins to rupees
-      const rupeesCharged = Math.round((call.coinsCharged || 0) * coinToINRRate);
 
       return {
         id: String(call._id),
@@ -798,7 +793,7 @@ export const callService = {
         startTime: call.startTime,
         endTime: call.endTime,
         duration: call.durationSeconds || 0,
-        coinsCharged: rupeesCharged, // Return rupees, keep field name for compatibility
+        coinsCharged: call.coinsCharged || 0, // Return actual coins charged to user
         createdAt: call.createdAt,
       };
     });
