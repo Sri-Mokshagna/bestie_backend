@@ -455,15 +455,17 @@ export const callService = {
 
         // Get commission config (cached)
         const responderPercentage = await commissionService.getResponderPercentage();
-
-        // Calculate responder earnings in COINS first
-        // Use Math.round() instead of Math.floor() for fairer distribution with small amounts
-        // Example: 2 coins × 30% = 0.6 → rounds to 1 coin (instead of 0)
-        const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
-
-        // FIX 5: Convert coins to rupees before storing
         const coinToINRRate = await commissionService.getCoinToINRRate();
-        const responderRupees = Math.round(responderCoins * coinToINRRate);
+
+        // CORRECT CALCULATION ORDER:
+        // 1. First convert ALL coins to rupees (total transaction value in rupees)
+        // 2. Then apply commission percentage to rupees
+        // Example: 10 coins × ₹0.5 = ₹5 total, then 50% commission = ₹2.5 to responder
+        const totalRupees = actualDeduction * coinToINRRate;
+        const responderRupees = Math.round(totalRupees * (responderPercentage / 100));
+
+        // Calculate coins for logging (reverse calculation)
+        const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
 
         // Credit responder (NOW IN RUPEES, NOT COINS)
         let responder = await Responder.findOne({ userId: call.responderId });
