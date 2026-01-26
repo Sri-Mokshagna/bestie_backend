@@ -18,10 +18,10 @@ export interface IKycDocs {
 }
 
 export interface IEarnings {
-  totalCoins: number;
-  pendingCoins: number;
-  lockedCoins: number;
-  redeemedCoins: number;
+  totalRupees: number; // Changed from totalCoins - now stores rupees directly
+  pendingRupees: number; // Changed from pendingCoins
+  lockedRupees: number; // Changed from lockedCoins
+  redeemedRupees: number; // Changed from redeemedCoins
 }
 
 export interface IResponder extends Document {
@@ -93,10 +93,10 @@ const responderSchema = new Schema<IResponder>(
       trim: true,
     },
     earnings: {
-      totalCoins: { type: Number, default: 0 },
-      pendingCoins: { type: Number, default: 0 },
-      lockedCoins: { type: Number, default: 0 },
-      redeemedCoins: { type: Number, default: 0 },
+      totalRupees: { type: Number, default: 0 }, // Changed from totalCoins
+      pendingRupees: { type: Number, default: 0 }, // Changed from pendingCoins
+      lockedRupees: { type: Number, default: 0 }, // Changed from lockedCoins
+      redeemedRupees: { type: Number, default: 0 }, // Changed from redeemedCoins
     },
     rating: {
       type: Number,

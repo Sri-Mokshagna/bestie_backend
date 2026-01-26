@@ -26,23 +26,21 @@ export const getEarnings = asyncHandler(async (req: AuthRequest, res: Response) 
 
   const redemptionInfo = await coinService.canRedeem(req.user.id);
 
-  // Convert coins to rupees using commission rate and round to integers
-  const totalRupees = Math.round(await coinService.calculateRedemptionAmount(responder.earnings.totalCoins));
-  const pendingRupees = Math.round(await coinService.calculateRedemptionAmount(responder.earnings.pendingCoins));
-  const redeemedRupees = Math.round(await coinService.calculateRedemptionAmount(responder.earnings.redeemedCoins));
+  // FIX 5: Now earnings are already in RUPEES, no conversion needed!
+  // Just get the minimum redemption amount in rupees
   const minRequiredRupees = Math.round(await coinService.calculateRedemptionAmount(redemptionInfo.minRequired));
 
   res.json({
     earnings: {
-      totalCoins: totalRupees, // Return rounded rupees as integer
-      pendingCoins: pendingRupees, // Return rounded rupees as integer
-      redeemedCoins: redeemedRupees, // Return rounded rupees as integer
+      totalCoins: responder.earnings.totalRupees, // Already in rupees (keeping field name for compatibility)
+      pendingCoins: responder.earnings.pendingRupees, // Already in rupees
+      redeemedCoins: responder.earnings.redeemedRupees, // Already in rupees
     },
     upiId: responder.upiId,
     redemption: {
       canRedeem: redemptionInfo.canRedeem,
-      minRequired: minRequiredRupees, // Return rounded rupees as integer
-      amountINR: pendingRupees, // This was already correct
+      minRequired: minRequiredRupees,
+      amountINR: responder.earnings.pendingRupees, // Already in rupees
     },
   });
 });
@@ -112,7 +110,7 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
     throw new AppError(404, 'Responder profile not found');
   }
 
-  // Check if responder has minimum required coins
+  // Check if responder has minimum required rupees
   const redemptionInfo = await coinService.canRedeem(req.user.id);
   if (!redemptionInfo.canRedeem) {
     throw new AppError(
@@ -122,16 +120,16 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
     );
   }
 
-  // Validate amount
-  const coinsToRedeem = parseInt(amount);
-  if (isNaN(coinsToRedeem) || coinsToRedeem < 1) {
-    throw new AppError(400, 'Amount must be at least 1 coin');
+  // FIX 5: Amount is now in RUPEES, not coins
+  const rupeesToRedeem = parseInt(amount);
+  if (isNaN(rupeesToRedeem) || rupeesToRedeem < 1) {
+    throw new AppError(400, 'Amount must be at least ₹1');
   }
 
-  if (coinsToRedeem > responder.earnings.pendingCoins) {
+  if (rupeesToRedeem > responder.earnings.pendingRupees) {
     throw new AppError(
       400,
-      `Amount must be less than or equal to your available balance (${responder.earnings.pendingCoins} coins)`,
+      `Amount must be less than or equal to your available balance (₹${responder.earnings.pendingRupees})`,
       'AMOUNT_EXCEEDS_BALANCE'
     );
   }
@@ -146,7 +144,8 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
     throw new AppError(400, 'You already have a pending payout request', 'PAYOUT_PENDING');
   }
 
-  const amountINR = await coinService.calculateRedemptionAmount(coinsToRedeem);
+  // FIX 5: Amount is already in rupees, no conversion needed
+  const amountINR = rupeesToRedeem;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -166,7 +165,7 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
       [
         {
           responderId: responder._id,
-          coins: coinsToRedeem,
+          coins: rupeesToRedeem, // Storing rupees (keeping field name for compatibility)
           amountINR,
           upiId: upiId.trim(),
           status: PayoutStatus.PENDING,
@@ -175,13 +174,13 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
       { session }
     );
 
-    // Move coins from pending to redeemed (will be reverted if payout is rejected)
+    // Move rupees from pending to redeemed (will be reverted if payout is rejected)
     await Responder.findByIdAndUpdate(
       responder._id,
       {
         $inc: {
-          'earnings.pendingCoins': -coinsToRedeem,
-          'earnings.redeemedCoins': coinsToRedeem,
+          'earnings.pendingRupees': -rupeesToRedeem,
+          'earnings.redeemedRupees': rupeesToRedeem,
         },
       },
       { session }

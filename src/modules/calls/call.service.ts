@@ -270,10 +270,20 @@ export const callService = {
       return call;
     }
 
-    // Normal flow - call must be in CONNECTING state for first-time activation
+    // CRITICAL: Strict validation - call MUST be in CONNECTING state for first-time activation
+    // This prevents premature activation before responder joins Zego room
     if (call.status !== CallStatus.CONNECTING) {
-      throw new AppError(400, 'Call is not in connecting state');
+      logger.warn(
+        { callId, userId, currentStatus: call.status },
+        '⚠️ REJECTED confirmCallConnection - call not in CONNECTING state'
+      );
+      throw new AppError(400, `Call is not in connecting state. Current status: ${call.status}`);
     }
+
+    logger.info(
+      { callId, userId, status: call.status },
+      '✅ confirmCallConnection - call is CONNECTING, proceeding with activation'
+    );
 
     // Get user's current coin balance
     const user = await User.findById(call.userId);
@@ -436,27 +446,31 @@ export const callService = {
       // Get commission config (cached)
       const responderPercentage = await commissionService.getResponderPercentage();
 
-      // Calculate responder earnings
+      // Calculate responder earnings in COINS first
       // Use Math.round() instead of Math.floor() for fairer distribution with small amounts
       // Example: 2 coins × 30% = 0.6 → rounds to 1 coin (instead of 0)
       const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
 
-      // Credit responder
+      // FIX 5: Convert coins to rupees before storing
+      const coinToINRRate = await commissionService.getCoinToINRRate();
+      const responderRupees = Math.round(responderCoins * coinToINRRate);
+
+      // Credit responder (NOW IN RUPEES, NOT COINS)
       let responder = await Responder.findOne({ userId: call.responderId });
       if (!responder) {
         // Create responder record if doesn't exist
         responder = await Responder.create({
           userId: call.responderId,
           earnings: {
-            totalCoins: responderCoins,
-            pendingCoins: responderCoins,
-            lockedCoins: 0,
-            redeemedCoins: 0,
+            totalRupees: responderRupees,
+            pendingRupees: responderRupees,
+            lockedRupees: 0,
+            redeemedRupees: 0,
           },
         });
       } else {
-        responder.earnings.totalCoins += responderCoins;
-        responder.earnings.pendingCoins += responderCoins;
+        responder.earnings.totalRupees += responderRupees;
+        responder.earnings.pendingRupees += responderRupees;
         await responder.save();
       }
 
@@ -483,11 +497,13 @@ export const callService = {
         callId: String(call._id),
         durationSeconds,
         coinsDeducted: actualDeduction,
-        responderEarned: responderCoins,
+        responderEarnedCoins: responderCoins,
+        responderEarnedRupees: responderRupees, // Now logging rupees
         commissionRate: responderPercentage,
+        coinToINRRate,
         userBalance: user.coinBalance,
-        responderPending: responder.earnings.pendingCoins,
-      }, 'Coins deducted for call and responder credited');
+        responderPendingRupees: responder.earnings.pendingRupees,
+      }, 'Coins deducted for call and responder credited in RUPEES');
     }
 
     // Update call
