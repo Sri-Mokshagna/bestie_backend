@@ -117,36 +117,44 @@ export class CoinService {
     session.startTransaction();
 
     try {
-      // Determine who is the user and who is the responder
-      const [sender, recipient] = await Promise.all([
-        User.findById(senderId).select('role coinBalance').session(session),
-        User.findById(recipientId).select('role coinBalance').session(session),
-      ]);
+      // Determine who is sending
+      const sender = await User.findById(senderId).select('role coinBalance').session(session);
 
       if (!sender) {
         throw new AppError(404, 'Sender not found');
       }
+
+      // IMPORTANT: Only charge when USER sends message
+      // If RESPONDER sends message, it's FREE (no charge to user)
+      if (sender.role === 'responder') {
+        await session.commitTransaction();
+        logger.info({
+          msg: 'Responder message - no charge',
+          senderId,
+          recipientId,
+          chatId,
+        });
+        return {
+          balance: 0, // Not applicable for responder
+          coinsDeducted: 0, // No coins deducted
+        };
+      }
+
+      // Sender is a USER - proceed with charging
+      const recipient = await User.findById(recipientId).select('role').session(session);
+
       if (!recipient) {
         throw new AppError(404, 'Recipient not found');
       }
 
-      let actualUserId: string;
-      let actualResponderId: string;
-      let user: any;
-
-      // Identify who is the user (the one to be charged)
-      if (sender.role === 'user') {
-        actualUserId = senderId;
-        actualResponderId = recipientId;
-        user = sender; // User is already fetched
-      } else if (sender.role === 'responder') {
-        // If responder is sending, the USER (recipient) should be charged
-        actualUserId = recipientId;
-        actualResponderId = senderId;
-        user = recipient; // User is already fetched
-      } else {
-        throw new AppError(400, 'Invalid sender role');
+      // Verify recipient is a responder
+      if (recipient.role !== 'responder') {
+        throw new AppError(400, 'Can only send paid messages to responders');
       }
+
+      const actualUserId = senderId;
+      const actualResponderId = recipientId;
+      const user = sender;
 
       // Check balance (user is already fetched above)
       if (user.coinBalance < coinsToDeduct) {
@@ -175,20 +183,27 @@ export class CoinService {
         throw new AppError(400, 'Insufficient coins', 'INSUFFICIENT_COINS');
       }
 
+
       // Credit responder
       // Commission percentage already fetched BEFORE transaction
-      // Use Math.round() for fair distribution with small amounts
-      const responderCoins = Math.round(
-        (coinsToDeduct * responderPercentage) / 100
-      );
+      // Get coin to INR rate for converting to rupees
+      const coinToINRRate = await commissionService.getCoinToINRRate();
 
-      // Update responder earnings directly (avoid findOneAndUpdate to prevent transaction conflicts)
+      // CORRECT CALCULATION ORDER (same as call deduction):
+      // 1. First convert ALL coins to rupees (total transaction value in rupees)
+      // 2. Then apply commission percentage to rupees
+      // Example: 2 coins × ₹0.1 = ₹0.2 total, then 60% commission = ₹0.12 to responder
+      const totalRupees = coinsToDeduct * coinToINRRate;
+      // Round to 2 decimal places (paisa precision) instead of whole rupees
+      const responderRupees = Math.round(totalRupees * (responderPercentage / 100) * 100) / 100;
+
+      // Update responder earnings in RUPEES (not coins)
       await Responder.updateOne(
         { userId: actualResponderId },
         {
           $inc: {
-            'earnings.totalCoins': responderCoins,
-            'earnings.pendingCoins': responderCoins
+            'earnings.totalRupees': responderRupees,
+            'earnings.pendingRupees': responderRupees
           }
         },
         { session }
@@ -201,9 +216,10 @@ export class CoinService {
             userId: actualUserId,
             responderId: actualResponderId,
             type: TransactionType.CHAT,
-            coins: -coinsToDeduct,
+            coins: coinsToDeduct, // User was charged this many coins
+            responderEarnings: responderRupees, // Store actual rupees earned (with paisa precision)
             status: TransactionStatus.COMPLETED,
-            meta: { chatId, responderEarned: responderCoins, senderId },
+            meta: { chatId, senderId },
           },
         ],
         { session }

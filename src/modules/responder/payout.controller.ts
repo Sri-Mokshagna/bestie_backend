@@ -121,15 +121,19 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
   }
 
   // FIX 5: Amount is now in RUPEES, not coins
-  const rupeesToRedeem = parseInt(amount);
+  // Support decimal values for paisa precision (e.g., 100.50)
+  const rupeesToRedeem = parseFloat(amount);
   if (isNaN(rupeesToRedeem) || rupeesToRedeem < 1) {
     throw new AppError(400, 'Amount must be at least ₹1');
   }
 
-  if (rupeesToRedeem > responder.earnings.pendingRupees) {
+  // Round to 2 decimal places to prevent floating point issues
+  const roundedAmount = Math.round(rupeesToRedeem * 100) / 100;
+
+  if (roundedAmount > responder.earnings.pendingRupees) {
     throw new AppError(
       400,
-      `Amount must be less than or equal to your available balance (₹${responder.earnings.pendingRupees})`,
+      `Amount must be less than or equal to your available balance (₹${responder.earnings.pendingRupees.toFixed(2)})`,
       'AMOUNT_EXCEEDS_BALANCE'
     );
   }
@@ -145,7 +149,7 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
   }
 
   // FIX 5: Amount is already in rupees, no conversion needed
-  const amountINR = rupeesToRedeem;
+  const amountINR = roundedAmount;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -165,7 +169,7 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
       [
         {
           responderId: responder._id,
-          coins: rupeesToRedeem, // Storing rupees (keeping field name for compatibility)
+          coins: roundedAmount, // Storing rupees with paisa precision (keeping field name for compatibility)
           amountINR,
           upiId: upiId.trim(),
           status: PayoutStatus.PENDING,
@@ -179,8 +183,8 @@ export const requestPayout = asyncHandler(async (req: AuthRequest, res: Response
       responder._id,
       {
         $inc: {
-          'earnings.pendingRupees': -rupeesToRedeem,
-          'earnings.redeemedRupees': rupeesToRedeem,
+          'earnings.pendingRupees': -roundedAmount,
+          'earnings.redeemedRupees': roundedAmount,
         },
       },
       { session }

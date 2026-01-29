@@ -209,12 +209,54 @@ export const chatController = {
       throw new AppError(403, 'Not authorized to send messages in this chat');
     }
 
+    // Import coinService for coin deduction
+    const { coinService } = await import('../../services/coinService');
+
+    // Get the other participant (recipient)
+    const recipientId = chat.participants.find(
+      (p) => p.toString() !== req.user!.id
+    )?.toString();
+
+    if (!recipientId) {
+      throw new AppError(400, 'Recipient not found');
+    }
+
+    // Deduct coins for the message
+    // The service automatically identifies user vs responder and charges the user
+    let coinsCharged = 0;
+    try {
+      const result = await coinService.deductForChat(
+        req.user.id,
+        recipientId,
+        chatId
+      );
+      coinsCharged = result.coinsDeducted;
+      logger.info({
+        msg: 'Coins deducted for chat message',
+        senderId: req.user.id,
+        recipientId,
+        chatId,
+        coinsCharged,
+        newBalance: result.balance,
+      });
+    } catch (error: any) {
+      // If coin deduction fails (e.g., insufficient balance), throw the error
+      logger.warn({
+        msg: 'Failed to deduct coins for chat message',
+        senderId: req.user.id,
+        recipientId,
+        chatId,
+        error: error.message,
+      });
+      throw error; // This will return 400 with INSUFFICIENT_COINS error code
+    }
+
     // Create the message
     const message = await Message.create({
       chatId: new Types.ObjectId(chatId),
       senderId: new Types.ObjectId(req.user.id),
       content: content.trim(),
-      coinsCharged: 0, // TODO: Implement coin charging logic
+      coinsCharged, // Store the actual coins charged
     });
 
     // Update chat's lastMessageAt
@@ -235,7 +277,7 @@ export const chatController = {
         readAt: createdMessage!.readAt,
       },
     });
-    
+
     // PUSH NOTIFICATION: Send push notification to recipient (non-blocking)
     // This runs after response is sent to avoid slowing down the API
     (async () => {
@@ -244,17 +286,17 @@ export const chatController = {
         const recipientId = chat.participants.find(
           (p) => p.toString() !== req.user!.id
         )?.toString();
-        
+
         if (recipientId) {
           const [recipient, sender] = await Promise.all([
             User.findById(recipientId).select('fcmToken profile phone').lean(),
             User.findById(req.user!.id).select('profile phone').lean(),
           ]);
-          
+
           if (recipient?.fcmToken) {
             const senderName = sender?.profile?.name || sender?.phone || 'Someone';
             const messageContent = content.trim();
-            
+
             await pushNotificationService.sendNotification(
               recipient.fcmToken,
               'New Message',

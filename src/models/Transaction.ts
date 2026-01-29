@@ -21,6 +21,7 @@ export interface ITransaction extends Document {
   responderId?: Types.ObjectId;
   type: TransactionType;
   coins: number;
+  responderEarnings?: number; // Actual rupees earned at transaction time (with paisa precision)
   status: TransactionStatus;
   meta?: Record<string, any>;
   createdAt: Date;
@@ -48,6 +49,9 @@ const transactionSchema = new Schema<ITransaction>(
     coins: {
       type: Number,
       required: true,
+    },
+    responderEarnings: {
+      type: Number, // Stores rupees with paisa precision (e.g., 2.50)
     },
     status: {
       type: String,

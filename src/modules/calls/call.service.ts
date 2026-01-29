@@ -462,7 +462,8 @@ export const callService = {
         // 2. Then apply commission percentage to rupees
         // Example: 10 coins × ₹0.5 = ₹5 total, then 50% commission = ₹2.5 to responder
         const totalRupees = actualDeduction * coinToINRRate;
-        const responderRupees = Math.round(totalRupees * (responderPercentage / 100));
+        // Round to 2 decimal places (paisa precision) instead of whole rupees
+        const responderRupees = Math.round(totalRupees * (responderPercentage / 100) * 100) / 100;
 
         // Calculate coins for logging (reverse calculation)
         const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
@@ -492,6 +493,7 @@ export const callService = {
             userId: call.userId,
             responderId: call.responderId,
             coins: actualDeduction,
+            responderEarnings: responderRupees, // Store actual earnings at transaction time
             type: TransactionType.CALL,
             status: TransactionStatus.COMPLETED,
             meta: {
@@ -760,17 +762,22 @@ export const callService = {
       callCount: calls.length,
     }, 'Call history retrieved with batch lookup');
 
-    // Get commission config for responder earnings calculation
-    const { commissionService } = await import('../../services/commissionService');
-    const [responderPercentage, coinToINRRate] = await Promise.all([
-      commissionService.getResponderPercentage(),
-      commissionService.getCoinToINRRate(),
-    ]);
+    // Fetch transactions to get stored responderEarnings (prevents history changing when commission changes)
+    const callIds = calls.map(c => String(c._id));
+    const transactions = await Transaction.find({
+      'meta.callId': { $in: callIds },
+      type: TransactionType.CALL,
+    }).lean();
+
+    // Create map: callId -> transaction
+    const transactionMap = new Map(
+      transactions.map(t => [t.meta?.callId, t])
+    );
 
     // Format calls with user data from map
     // NOTE: Different display for users vs responders:
     // - Users see COINS charged (e.g., 10 coins)
-    // - Responders see RUPEES earned (e.g., ₹3 after commission)
+    // - Responders see RUPEES earned (e.g., ₹3 after commission) - FROM STORED TRANSACTION
     return calls.map(call => {
       const userIdStr = call.userId.toString();
       const responderIdStr = call.responderId.toString();
@@ -782,14 +789,13 @@ export const callService = {
       const userName = userDoc?.profile?.name?.trim() || userDoc?.phone || 'User';
       const responderName = responderDoc?.profile?.name?.trim() || responderDoc?.phone || 'Responder';
 
-      // Calculate display value based on who's viewing
+      // Get display value based on who's viewing
       let displayValue: number;
       if (userId === responderIdStr) {
-        // Responder viewing: show their earnings in rupees
-        // 1. Convert coins to rupees: coinsCharged × coinToINRRate
-        // 2. Apply commission: totalRupees × responderPercentage
-        const totalRupees = (call.coinsCharged || 0) * coinToINRRate;
-        displayValue = Math.round(totalRupees * (responderPercentage / 100));
+        // Responder viewing: use STORED earnings from transaction (not dynamically calculated)
+        // This ensures historical earnings don't change when commission settings are updated
+        const transaction = transactionMap.get(String(call._id));
+        displayValue = transaction?.responderEarnings || 0;
       } else {
         // User viewing: show coins charged
         displayValue = call.coinsCharged || 0;
@@ -816,7 +822,7 @@ export const callService = {
         startTime: call.startTime,
         endTime: call.endTime,
         duration: call.durationSeconds || 0,
-        coinsCharged: displayValue, // Coins for users, Rupees for responders
+        coinsCharged: displayValue, // Coins for users, Rupees for responders (from stored transaction)
         createdAt: call.createdAt,
       };
     });

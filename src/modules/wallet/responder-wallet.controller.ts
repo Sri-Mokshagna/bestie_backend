@@ -68,6 +68,7 @@ export const getResponderTransactions = asyncHandler(async (req: AuthRequest, re
             id: t._id,
             type: t.type,
             coins: t.coins,
+            responderEarnings: t.responderEarnings, // Include stored earnings for display
             status: t.status,
             meta: t.meta,
             user: t.userId,
