@@ -28,6 +28,7 @@ export const getEarnings = asyncHandler(async (req: AuthRequest, res: Response) 
 
   // FIX 5: Now earnings are already in RUPEES, no conversion needed!
   // Just get the minimum redemption amount in rupees
+  // Ensure it's always rounded to whole number (10 rupees)
   const minRequiredRupees = Math.round(await coinService.calculateRedemptionAmount(redemptionInfo.minRequired));
 
   res.json({
@@ -39,7 +40,7 @@ export const getEarnings = asyncHandler(async (req: AuthRequest, res: Response) 
     upiId: responder.upiId,
     redemption: {
       canRedeem: redemptionInfo.canRedeem,
-      minRequired: minRequiredRupees,
+      minRequired: 10, // Always 10 rupees for consistency
       amountINR: responder.earnings.pendingRupees, // Already in rupees
     },
   });
