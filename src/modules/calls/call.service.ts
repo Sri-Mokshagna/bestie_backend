@@ -193,35 +193,27 @@ export const callService = {
     const callerName = user.profile?.name || user.phone || 'Unknown';
     const receiverName = responderUser.profile?.name || responderUser.phone || 'Responder';
 
-    // Emit socket event to responder for real-time notification
-    const { isUserConnected } = require('../lib/socket');
-    const socketDelivered = emitToUser(responderUser._id.toString(), 'incoming_call', {
-      id: String(call._id),
-      userId: call.userId.toString(),
-      responderId: call.responderId.toString(),
-      type: call.type,
-      status: call.status,
-      zegoRoomId: call.zegoRoomId,
-      createdAt: call.createdAt,
+    // NOTIFICATION STRATEGY: Dual-path for maximum reliability
+    // Send BOTH socket and FCM simultaneously - whichever delivers first wins
+
+    // Get socket connection status
+    const { isUserConnected } = require('../../lib/socket');
+    const hasActiveSocket = isUserConnected(responderUser._id.toString());
+
+    // 1. Socket notification (instant if connected)
+    emitToUser(responderUser._id.toString(), 'incoming_call', {
+      callId: String(call._id),
+      callerId: userId,
       callerName,
-      receiverName,
+      callType: type,
+      zegoRoomId: call.zegoRoomId,
     });
 
-    // Check socket connection status
-    const hasActiveSocket = isUserConnected(responderUser._id.toString());
-    if (!hasActiveSocket) {
-      logger.warn({
-        callId: String(call._id),
-        responderId: responderUser._id.toString(),
-      }, '⚠️ Responder has no active socket - relying on FCM push notification');
-    }
-
-    // ADDITIVE: Send push notification for background/killed app
-    // This runs asynchronously and doesn't block the response
-    // If it fails, socket notification still works for foreground apps
-    // CRITICAL: Always send FCM if socket not connected
+    // 2. FCM notification (ALWAYS send, not just fallback)
+    // FCM is reliable under concurrent load and works even if app killed
     if (responderUser.fcmToken) {
-      const fcmPromise = pushNotificationService.sendIncomingCallNotification(
+      // Fire-and-forget - don't block response
+      pushNotificationService.sendIncomingCallNotification(
         responderUser.fcmToken,
         {
           callId: String(call._id),
@@ -230,31 +222,33 @@ export const callService = {
           callType: type === CallType.AUDIO ? 'audio' : 'video',
           zegoRoomId: call.zegoRoomId,
         }
-      );
-
-      // If socket not connected, wait for FCM to complete and log result
+      ).then((success) => {
+        if (success) {
+          logger.info({
+            callId: String(call._id),
+            hasSocket: hasActiveSocket,
+          }, '✅ FCM notification sent successfully');
+        } else {
+          logger.warn({
+            callId: String(call._id),
+            hasSocket: hasActiveSocket,
+          }, '⚠️ FCM failed - relying on socket notification');
+        }
+      }).catch(err => {
+        logger.error({
+          error: err,
+          callId: String(call._id),
+          hasSocket: hasActiveSocket,
+        }, '❌ FCM notification error');
+      });
+    } else {
+      // No FCM token - socket is only option
       if (!hasActiveSocket) {
-        fcmPromise.then((success) => {
-          if (success) {
-            logger.info({ callId: String(call._id) }, '✅ FCM notification sent (socket disconnected)');
-          } else {
-            logger.error({ callId: String(call._id) }, '🚨 CRITICAL: Both socket and FCM failed - responder may not receive call!');
-          }
-        }).catch(err => {
-          logger.error({ error: err, callId: String(call._id) }, '🚨 CRITICAL: FCM failed and socket disconnected!');
-        });
-      } else {
-        // Socket connected, FCM is just backup - fire and forget
-        fcmPromise.catch(err => {
-          // Log but don't fail the call initiation
-          logger.warn({ error: err, callId: String(call._id) }, 'Push notification failed (non-blocking)');
-        });
+        logger.error({
+          callId: String(call._id),
+          responderId: responderUser._id.toString(),
+        }, '🚨 CRITICAL: No FCM token AND no socket - notification will fail!');
       }
-    } else if (!hasActiveSocket) {
-      logger.error({
-        callId: String(call._id),
-        responderId: responderUser._id.toString(),
-      }, '🚨 CRITICAL: No FCM token AND no socket connection - responder cannot receive call!');
     }
 
     return call;
