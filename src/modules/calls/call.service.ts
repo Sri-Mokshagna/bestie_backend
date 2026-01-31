@@ -469,23 +469,40 @@ export const callService = {
         const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
 
         // Credit responder (NOW IN RUPEES, NOT COINS)
-        let responder = await Responder.findOne({ userId: call.responderId });
-        if (!responder) {
-          // Create responder record if doesn't exist
-          responder = await Responder.create({
-            userId: call.responderId,
-            earnings: {
-              totalRupees: responderRupees,
-              pendingRupees: responderRupees,
-              lockedRupees: 0,
-              redeemedRupees: 0,
-            },
-          });
-        } else {
-          responder.earnings.totalRupees += responderRupees;
-          responder.earnings.pendingRupees += responderRupees;
-          await responder.save();
+        // CRITICAL: Use atomic update to prevent race conditions when multiple calls end simultaneously
+        const responderUpdate = await Responder.findOneAndUpdate(
+          { userId: call.responderId },
+          {
+            $inc: {
+              'earnings.totalRupees': responderRupees,
+              'earnings.pendingRupees': responderRupees
+            }
+          },
+          {
+            new: true,  // Return updated document
+            upsert: true,  // Create if doesn't exist
+            setDefaultsOnInsert: true,  // Set defaults when creating
+          }
+        );
+
+        // CRITICAL: Verify that responder earnings were actually updated
+        if (!responderUpdate) {
+          logger.error({
+            callId: String(call._id),
+            responderId: call.responderId.toString(),
+            responderRupees,
+            actualDeduction,
+          }, '🚨 CRITICAL: Failed to update responder earnings - payment lost!');
+          throw new Error('Failed to credit responder - database update returned null');
         }
+
+        logger.info({
+          callId: String(call._id),
+          responderId: call.responderId.toString(),
+          responderRupees,
+          updatedTotalRupees: responderUpdate.earnings.totalRupees,
+          updatedPendingRupees: responderUpdate.earnings.pendingRupees,
+        }, '✅ Responder earnings updated successfully (atomic operation)');
 
         // Create transaction record for user
         await Transaction.create([
@@ -516,7 +533,7 @@ export const callService = {
           commissionRate: responderPercentage,
           coinToINRRate,
           userBalance: user.coinBalance,
-          responderPendingRupees: responder.earnings.pendingRupees,
+          responderPendingRupees: responderUpdate.earnings.pendingRupees,
         }, 'Coins deducted for call and responder credited in RUPEES');
       }
     }

@@ -197,8 +197,9 @@ export class CoinService {
       // Round to 2 decimal places (paisa precision) instead of whole rupees
       const responderRupees = Math.round(totalRupees * (responderPercentage / 100) * 100) / 100;
 
+      // CRITICAL: Use atomic update to prevent race conditions
       // Update responder earnings in RUPEES (not coins)
-      await Responder.updateOne(
+      const responderUpdateResult = await Responder.updateOne(
         { userId: actualResponderId },
         {
           $inc: {
@@ -206,8 +207,28 @@ export class CoinService {
             'earnings.pendingRupees': responderRupees
           }
         },
-        { session }
+        { session, upsert: true }
       );
+
+      // CRITICAL: Verify that responder earnings were actually updated
+      if (responderUpdateResult.modifiedCount === 0 && responderUpdateResult.upsertedCount === 0) {
+        logger.error({
+          chatId,
+          responderId: actualResponderId,
+          responderRupees,
+          coinsToDeduct,
+          updateResult: responderUpdateResult,
+        }, '🚨 CRITICAL: Failed to update responder earnings for chat - payment lost!');
+        throw new Error('Failed to credit responder for chat - database update failed');
+      }
+
+      logger.info({
+        chatId,
+        responderId: actualResponderId,
+        responderRupees,
+        modified: responderUpdateResult.modifiedCount,
+        upserted: responderUpdateResult.upsertedCount,
+      }, '✅ Responder earnings updated for chat (atomic operation)');
 
       // Create transaction record
       await Transaction.create(
@@ -224,6 +245,7 @@ export class CoinService {
         ],
         { session }
       );
+
 
       await session.commitTransaction();
 
