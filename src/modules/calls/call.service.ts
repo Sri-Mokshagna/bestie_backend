@@ -105,10 +105,40 @@ export const callService = {
     if (type === CallType.VIDEO && !responderProfileDoc.videoEnabled) {
       throw new AppError(400, 'Responder is not available for video calls', 'RESPONDER_NOT_AVAILABLE');
     }
-    // Check inCall status from both User and Responder models
-    if (responderProfileDoc.inCall || responderUser.inCall) {
+
+    // CRITICAL: Atomically check and set inCall flag to prevent race conditions
+    // This prevents multiple simultaneous calls from getting through
+    // If inCall is already true, updateResult will be null
+    const inCallUpdateResult = await User.findOneAndUpdate(
+      {
+        _id: responderId,
+        inCall: false  // Only update if not already in call
+      },
+      { inCall: true },
+      { new: true }
+    );
+
+    if (!inCallUpdateResult) {
+      // Another call beat us - responder is already in a call
+      logger.info({
+        userId,
+        responderId,
+        reason: 'Race condition - inCall flag already set'
+      }, 'Call blocked: Responder already in call (atomic check)');
       throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
     }
+
+    // Also set in Responder document for consistency
+    await Responder.findOneAndUpdate(
+      { userId: responderId },
+      { inCall: true }
+    );
+
+    logger.info({
+      userId,
+      responderId,
+      type
+    }, 'inCall flag set atomically - call proceeding');
 
     // Check if responder has blocked this user
     if (responderUser.blockedUsers?.includes(userId)) {
@@ -164,7 +194,8 @@ export const callService = {
     const receiverName = responderUser.profile?.name || responderUser.phone || 'Responder';
 
     // Emit socket event to responder for real-time notification
-    emitToUser(responderUser._id.toString(), 'incoming_call', {
+    const { isUserConnected } = require('../lib/socket');
+    const socketDelivered = emitToUser(responderUser._id.toString(), 'incoming_call', {
       id: String(call._id),
       userId: call.userId.toString(),
       responderId: call.responderId.toString(),
@@ -176,11 +207,21 @@ export const callService = {
       receiverName,
     });
 
+    // Check socket connection status
+    const hasActiveSocket = isUserConnected(responderUser._id.toString());
+    if (!hasActiveSocket) {
+      logger.warn({
+        callId: String(call._id),
+        responderId: responderUser._id.toString(),
+      }, '⚠️ Responder has no active socket - relying on FCM push notification');
+    }
+
     // ADDITIVE: Send push notification for background/killed app
     // This runs asynchronously and doesn't block the response
     // If it fails, socket notification still works for foreground apps
+    // CRITICAL: Always send FCM if socket not connected
     if (responderUser.fcmToken) {
-      pushNotificationService.sendIncomingCallNotification(
+      const fcmPromise = pushNotificationService.sendIncomingCallNotification(
         responderUser.fcmToken,
         {
           callId: String(call._id),
@@ -189,10 +230,31 @@ export const callService = {
           callType: type === CallType.AUDIO ? 'audio' : 'video',
           zegoRoomId: call.zegoRoomId,
         }
-      ).catch(err => {
-        // Log but don't fail the call initiation
-        logger.warn({ error: err, callId: String(call._id) }, 'Push notification failed (non-blocking)');
-      });
+      );
+
+      // If socket not connected, wait for FCM to complete and log result
+      if (!hasActiveSocket) {
+        fcmPromise.then((success) => {
+          if (success) {
+            logger.info({ callId: String(call._id) }, '✅ FCM notification sent (socket disconnected)');
+          } else {
+            logger.error({ callId: String(call._id) }, '🚨 CRITICAL: Both socket and FCM failed - responder may not receive call!');
+          }
+        }).catch(err => {
+          logger.error({ error: err, callId: String(call._id) }, '🚨 CRITICAL: FCM failed and socket disconnected!');
+        });
+      } else {
+        // Socket connected, FCM is just backup - fire and forget
+        fcmPromise.catch(err => {
+          // Log but don't fail the call initiation
+          logger.warn({ error: err, callId: String(call._id) }, 'Push notification failed (non-blocking)');
+        });
+      }
+    } else if (!hasActiveSocket) {
+      logger.error({
+        callId: String(call._id),
+        responderId: responderUser._id.toString(),
+      }, '🚨 CRITICAL: No FCM token AND no socket connection - responder cannot receive call!');
     }
 
     return call;

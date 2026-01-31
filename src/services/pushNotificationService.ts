@@ -88,7 +88,13 @@ export const pushNotificationService = {
       // Don't throw - push notifications are best-effort
       // Socket notifications will still work for foreground apps
       if (error.code === 'messaging/registration-token-not-registered') {
-        logger.warn({ fcmToken: fcmToken.substring(0, 20) + '...' }, 'FCM token invalid/expired');
+        logger.warn({ fcmToken: fcmToken.substring(0, 20) + '...' }, 'FCM token invalid/expired - invalidating in database');
+        // CRITICAL: Remove invalid token from database to prevent future failures
+        // This runs async in background to not block the call flow
+        const User = require('../models/User').User;
+        User.updateOne({ fcmToken }, { $unset: { fcmToken: 1 } }).catch((err: any) => {
+          logger.error({ error: err }, 'Failed to invalidate FCM token in database');
+        });
       } else if (error.code === 'messaging/invalid-argument') {
         logger.warn({ error: error.message }, 'Invalid FCM message format');
       } else {
@@ -228,7 +234,12 @@ export const pushNotificationService = {
     } catch (error: any) {
       // Log specific error types
       if (error.code === 'messaging/registration-token-not-registered') {
-        logger.warn({ fcmToken: fcmToken.substring(0, 20) + '...' }, 'FCM token invalid/expired - user may need to re-login');
+        logger.warn({ fcmToken: fcmToken.substring(0, 20) + '...' }, 'FCM token invalid/expired - invalidating in database');
+        // Remove invalid token from database
+        const User = require('../models/User').User;
+        User.updateOne({ fcmToken }, { $unset: { fcmToken: 1 } }).catch((err: any) => {
+          logger.error({ error: err }, 'Failed to invalidate FCM token in database');
+        });
       } else if (error.code === 'messaging/invalid-argument') {
         logger.warn({ error: error.message }, 'Invalid FCM message format');
       } else {
