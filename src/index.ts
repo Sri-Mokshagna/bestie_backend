@@ -52,8 +52,19 @@ const io = new SocketServer(httpServer, {
   },
   transports: ['websocket', 'polling'],
   allowEIO3: true,
+
+  // PERFORMANCE: Increase limits for concurrent calls (10+ users simultaneously)
+  // These are ADDITIVE changes - increase capacity without changing behavior
+  maxHttpBufferSize: 1e7, // 10MB (up from 1MB default) - prevents buffer overflow under load
   pingTimeout: 60000,
   pingInterval: 25000,
+  connectTimeout: 45000, // 45s to establish connection
+
+  // PERFORMANCE: Enable compression to reduce bandwidth usage
+  // Only compresses messages >1KB, doesn't affect small messages
+  perMessageDeflate: {
+    threshold: 1024, // Compress messages larger than 1KB
+  },
 });
 
 const PORT = process.env.PORT || 3000;
@@ -172,6 +183,18 @@ app.use('/api', healthRoutes);
 // Initialize Socket.IO
 setSocketIO(io);
 initializeChatSocket(io);
+
+// MONITORING: Track server resources to detect bottlenecks
+// Logs every 30s - purely informational, doesn't affect functionality
+setInterval(() => {
+  const connections = io.engine.clientsCount;
+  const memUsage = process.memoryUsage();
+  logger.info({
+    activeConnections: connections,
+    memoryMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+    timestamp: new Date().toISOString(),
+  }, 'Server resource metrics');
+}, 30000); // Every 30 seconds
 
 // Error handlers
 app.use(notFound);
