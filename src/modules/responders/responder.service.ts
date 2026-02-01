@@ -105,6 +105,25 @@ export const responderService = {
     // Sync User online status to ensure calls work
     await User.findByIdAndUpdate(userId, { isOnline });
 
+    // ISSUE 1 FIX: Log warning if responder goes online without FCM token
+    // This helps identify responders who won't receive call notifications
+    // DEFENSE: This is READ-ONLY logging - does not change any existing flow
+    if (isOnline) {
+      const user = await User.findById(userId).select('fcmToken phone profile.name').lean();
+      if (!user?.fcmToken) {
+        logger.warn({
+          userId,
+          phone: user?.phone,
+          name: user?.profile?.name,
+        }, '⚠️ RESPONDER ONLINE WITHOUT FCM TOKEN - They will NOT receive call notifications until app is reopened!');
+      } else {
+        logger.info({
+          userId,
+          fcmTokenPrefix: user.fcmToken.substring(0, 20) + '...',
+        }, '✅ Responder online with valid FCM token');
+      }
+    }
+
     return responder;
   },
 

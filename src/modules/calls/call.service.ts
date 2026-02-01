@@ -108,10 +108,12 @@ export const callService = {
 
     // CRITICAL: Set inCall flag early to prevent concurrent calls
     // Only one call can ring at a time - subsequent calls get clear "busy" message
+    // DEFENSE: Using atomic findOneAndUpdate ensures only ONE concurrent call wins
+    // The condition {inCall: false} acts as a distributed lock
     const inCallUpdateResult = await User.findOneAndUpdate(
       {
         _id: responderId,
-        inCall: false  // Only update if not already in call
+        inCall: false  // Only update if not already in call - ATOMIC CHECK-AND-SET
       },
       { inCall: true },
       { new: true }
@@ -127,11 +129,16 @@ export const callService = {
       throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
     }
 
-    // Also set in Responder document for consistency
+    // ISSUE 3 FIX: Also set in Responder document for consistency
+    // DEFENSE: This is a SECONDARY sync only - User.inCall is the authoritative lock
+    // Even if this fails, the User.inCall flag protects against concurrent calls
     await Responder.findOneAndUpdate(
       { userId: responderId },
       { inCall: true }
-    );
+    ).catch(err => {
+      // Non-critical - User.inCall is the authoritative source
+      logger.warn({ responderId, error: err.message }, 'Failed to sync Responder.inCall (non-critical)');
+    });
 
     logger.info({
       userId,

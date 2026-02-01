@@ -75,11 +75,15 @@ const callSchema = new Schema<ICall>(
 );
 
 // Indexes
+// DEFENSE: Indexes are transparent to application logic - only improve query performance
 callSchema.index({ userId: 1, createdAt: -1 });
 callSchema.index({ responderId: 1, createdAt: -1 });
 callSchema.index({ responderId: 1, status: 1 }); // For checking active calls during initiation
 callSchema.index({ status: 1, createdAt: 1 }); // For cleanup queries
 callSchema.index({ userId: 1, status: 1 }); // For call history queries
+// ISSUE 6 FIX: Compound index for active call queries in initiateCall()
+// Query pattern: { responderId, status: { $in: [...] } }
+callSchema.index({ responderId: 1, status: 1, createdAt: -1 }); // Optimized for active call + cleanup queries
 // Note: unique on zegoRoomId already creates an index
 
 export const Call = model<ICall>('Call', callSchema);

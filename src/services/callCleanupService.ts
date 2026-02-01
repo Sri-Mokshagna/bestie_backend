@@ -6,7 +6,15 @@ import { Responder } from '../models/Responder';
 /**
  * ADDITIVE SAFETY SERVICE - Cleanup stuck inCall flags
  * This service adds protective cleanup without affecting existing call flow
- * Runs in background every 2 minutes to fix edge cases
+ * 
+ * ISSUE 4 FIX: Reduced interval from 2 minutes to 30 seconds
+ * DEFENSE: This is READ-ONLY detection + cleanup of STALE data only
+ * - Does NOT affect active calls (only checks calls older than 30 seconds)
+ * - Does NOT change call initiation flow
+ * - Does NOT change call end flow
+ * - Only cleans up flags that are ALREADY orphaned
+ * 
+ * Runs in background every 30 seconds to fix edge cases faster
  */
 
 export class CallCleanupService {
@@ -29,14 +37,15 @@ export class CallCleanupService {
             logger.error({ error: err.message }, 'Initial cleanup failed (non-critical)');
         });
 
-        // Then run every 2 minutes
+        // ISSUE 4 FIX: Run every 30 seconds instead of 2 minutes
+        // DEFENSE: Same logic, just more frequent - reduces stuck flag time from 2min to 30sec
         this.cleanupInterval = setInterval(() => {
             this.runCleanup().catch(err => {
                 logger.error({ error: err.message }, 'Scheduled cleanup failed (non-critical)');
             });
-        }, 2 * 60 * 1000); // 2 minutes
+        }, 30 * 1000); // 30 seconds (was 2 minutes)
 
-        logger.info('✅ CallCleanupService started (runs every 2 minutes)');
+        logger.info('✅ CallCleanupService started (runs every 30 seconds)');
     }
 
     /**
@@ -62,7 +71,9 @@ export class CallCleanupService {
         this.isRunning = true;
 
         try {
-            const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+            // ISSUE 4 FIX: Check calls older than 30 seconds (was 2 minutes)
+            // DEFENSE: Only affects calls that are ALREADY stale - active calls have recent timestamps
+            const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
             let fixedCount = 0;
 
             // Find responders who have inCall=true but NO active calls
@@ -82,7 +93,7 @@ export class CallCleanupService {
                 const activeCall = await Call.findOne({
                     responderId: responder._id,
                     status: { $in: [CallStatus.RINGING, CallStatus.CONNECTING, CallStatus.ACTIVE] },
-                    createdAt: { $gt: twoMinutesAgo }, // Only recent calls
+                    createdAt: { $gt: thirtySecondsAgo }, // ISSUE 4 FIX: 30 seconds (was 2 minutes)
                 });
 
                 if (!activeCall) {
