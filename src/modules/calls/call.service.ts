@@ -106,9 +106,8 @@ export const callService = {
       throw new AppError(400, 'Responder is not available for video calls', 'RESPONDER_NOT_AVAILABLE');
     }
 
-    // CRITICAL: Atomically check and set inCall flag to prevent race conditions
-    // This prevents multiple simultaneous calls from getting through
-    // If inCall is already true, updateResult will be null
+    // CRITICAL: Set inCall flag early to prevent concurrent calls
+    // Only one call can ring at a time - subsequent calls get clear "busy" message
     const inCallUpdateResult = await User.findOneAndUpdate(
       {
         _id: responderId,
@@ -119,12 +118,12 @@ export const callService = {
     );
 
     if (!inCallUpdateResult) {
-      // Another call beat us - responder is already in a call
+      // Another call is already ringing - responder is busy
       logger.info({
         userId,
         responderId,
-        reason: 'Race condition - inCall flag already set'
-      }, 'Call blocked: Responder already in call (atomic check)');
+        reason: 'inCall flag already set'
+      }, 'Call blocked: Responder already has incoming call');
       throw new AppError(400, 'Responder is currently in another call', 'RESPONDER_IN_CALL');
     }
 
@@ -138,7 +137,7 @@ export const callService = {
       userId,
       responderId,
       type
-    }, 'inCall flag set atomically - call proceeding');
+    }, 'inCall flag set - call can proceed');
 
     // Check if responder has blocked this user
     if (responderUser.blockedUsers?.includes(userId)) {
@@ -146,6 +145,7 @@ export const callService = {
     }
 
     // Check if responder is available (not busy with another call)
+    // Block ALL calls (RINGING, CONNECTING, ACTIVE) - only one at a time
     const activeCall = await Call.findOne({
       responderId: responderId,
       status: { $in: [CallStatus.RINGING, CallStatus.CONNECTING, CallStatus.ACTIVE] },
@@ -162,6 +162,10 @@ export const callService = {
         activeCall.status = CallStatus.MISSED;
         activeCall.endTime = now;
         await activeCall.save();
+
+        // CRITICAL: Clear inCall flag for stale RINGING calls
+        await User.findByIdAndUpdate(activeCall.responderId, { inCall: false });
+        await Responder.findOneAndUpdate({ userId: activeCall.responderId }, { inCall: false });
       } else if (
         (activeCall.status === CallStatus.CONNECTING || activeCall.status === CallStatus.ACTIVE) &&
         callAge > 300000 // 5 minutes
@@ -171,6 +175,10 @@ export const callService = {
         activeCall.status = CallStatus.ENDED;
         activeCall.endTime = now;
         await activeCall.save();
+
+        // Clear inCall flag for stale ACTIVE calls
+        await User.findByIdAndUpdate(activeCall.responderId, { inCall: false });
+        await Responder.findOneAndUpdate({ userId: activeCall.responderId }, { inCall: false });
       } else {
         // Call is recent, responder is genuinely busy
         throw new AppError(400, 'Responder is in another call', 'RESPONDER_IN_CALL');
@@ -203,7 +211,9 @@ export const callService = {
     // 1. Socket notification (instant if connected)
     emitToUser(responderUser._id.toString(), 'incoming_call', {
       callId: String(call._id),
-      callerId: userId,
+      userId: userId, // ADD: Consistent field naming
+      responderId: String(responderUser._id), // ADD: For proper call tracking
+      callerId: userId, // Keep for backwards compatibility
       callerName,
       callType: type,
       zegoRoomId: call.zegoRoomId,
@@ -217,7 +227,9 @@ export const callService = {
         responderUser.fcmToken,
         {
           callId: String(call._id),
-          callerId: userId,
+          userId: userId, // ADD: For consistent tracking
+          responderId: String(responderUser._id), // ADD: Responder's ID
+          callerId: userId, // Keep for backwards compatibility
           callerName,
           callType: type === CallType.AUDIO ? 'audio' : 'video',
           zegoRoomId: call.zegoRoomId,
@@ -272,6 +284,48 @@ export const callService = {
     // Update call status to CONNECTING (not ACTIVE yet)
     call.status = CallStatus.CONNECTING;
     await call.save();
+
+    // Set inCall flag when call is accepted (prevents new calls from ringing)
+    await User.findByIdAndUpdate(call.responderId, { inCall: true });
+    await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: true });
+
+    logger.info({
+      callId: String(call._id),
+      responderId: call.responderId.toString(),
+    }, 'inCall flag set - call accepted and connecting');
+
+    // Auto-reject any other RINGING calls to this responder
+    // This handles the case where multiple users called simultaneously
+    const otherRingingCalls = await Call.find({
+      _id: { $ne: call._id }, // Not this call
+      responderId: call.responderId,
+      status: CallStatus.RINGING,
+    });
+
+    if (otherRingingCalls.length > 0) {
+      logger.info({
+        callId: String(call._id),
+        otherCallsCount: otherRingingCalls.length,
+      }, 'Auto-rejecting other ringing calls');
+
+      // Reject all other ringing calls
+      for (const otherCall of otherRingingCalls) {
+        otherCall.status = CallStatus.MISSED;
+        otherCall.endTime = new Date();
+        await otherCall.save();
+
+        // Notify the caller that responder answered another call
+        emitToUser(otherCall.userId.toString(), 'call_ended', {
+          callId: String(otherCall._id),
+          reason: 'responder_answered_another_call',
+        });
+
+        logger.info({
+          rejectedCallId: String(otherCall._id),
+          acceptedCallId: String(call._id),
+        }, 'Other ringing call auto-rejected');
+      }
+    }
 
     // Notify caller that call was accepted and is connecting
     emitToUser(call.userId.toString(), 'call_accepted', {

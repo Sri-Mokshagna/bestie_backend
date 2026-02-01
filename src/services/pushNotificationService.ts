@@ -17,7 +17,9 @@ export const pushNotificationService = {
     fcmToken: string,
     callData: {
       callId: string;
-      callerId: string;
+      userId: string; // ADD: Caller's user ID
+      responderId: string; // ADD: Responder's ID
+      callerId: string; // Keep for backwards compatibility
       callerName: string;
       callType: 'audio' | 'video';
       zegoRoomId: string;
@@ -35,6 +37,8 @@ export const pushNotificationService = {
         data: {
           type: 'incoming_call',
           callId: callData.callId,
+          userId: callData.userId, // ADD
+          responderId: callData.responderId, // ADD
           callerId: callData.callerId,
           callerName: callData.callerName,
           callType: callData.callType,
