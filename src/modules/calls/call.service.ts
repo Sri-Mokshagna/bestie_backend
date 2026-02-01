@@ -259,9 +259,32 @@ export const callService = {
         logger.error({
           callId: String(call._id),
           responderId: responderUser._id.toString(),
+          responderPhone: responderUser.phone,
+          responderName: responderUser.profile?.name || 'Unknown',
         }, '🚨 CRITICAL: No FCM token AND no socket - notification will fail!');
+      } else {
+        logger.warn({
+          callId: String(call._id),
+          responderId: responderUser._id.toString(),
+          responderPhone: responderUser.phone,
+        }, '⚠️ No FCM token - relying on socket only');
       }
     }
+
+    // ENHANCED LOGGING: Log complete notification delivery status
+    logger.info({
+      callId: String(call._id),
+      userId,
+      responderId: responderUser._id.toString(),
+      responderPhone: responderUser.phone,
+      responderName: receiverName,
+      hasFcmToken: !!responderUser.fcmToken,
+      hasSocket: hasActiveSocket,
+      fcmTokenPrefix: responderUser.fcmToken?.substring(0, 15),
+      notificationStrategy: responderUser.fcmToken && hasActiveSocket ? 'dual' :
+        responderUser.fcmToken ? 'fcm-only' :
+          hasActiveSocket ? 'socket-only' : 'NONE',
+    }, '📞 Call initiated - notification delivery status');
 
     return call;
   },

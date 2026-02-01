@@ -308,6 +308,45 @@ export const authService = {
 
     await user.save();
 
+    // CRITICAL FIX: Create Responder document when role changes to responder
+    if (role === UserRole.RESPONDER && previousRole !== UserRole.RESPONDER) {
+      console.log('🎯 User becoming responder - creating Responder document');
+
+      const { Responder } = require('../../models/Responder');
+
+      // Check if Responder document already exists
+      let responderDoc = await Responder.findOne({ userId: user.id });
+
+      if (!responderDoc) {
+        // Create new Responder document with default settings
+        responderDoc = await Responder.create({
+          userId: user.id,
+          isOnline: user.isOnline || false,
+          kycStatus: 'pending', // New responders start as pending
+          earnings: {
+            totalCoins: 0,
+            pendingCoins: 0,
+            lockedCoins: 0,
+            redeemedCoins: 0,
+          },
+          rating: 0,
+          audioEnabled: user.audioEnabled ?? true,
+          videoEnabled: user.videoEnabled ?? true,
+          chatEnabled: user.chatEnabled ?? true,
+        });
+        console.log('✅ Responder document created successfully:', {
+          userId: user.id,
+          responderId: responderDoc.id,
+          phone: user.phone,
+        });
+      } else {
+        console.log('ℹ️ Responder document already exists:', {
+          userId: user.id,
+          responderId: responderDoc.id,
+        });
+      }
+    }
+
     console.log('✅ User role updated successfully:', {
       userId: user.id,
       previousRole,

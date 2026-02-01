@@ -30,82 +30,129 @@ export const pushNotificationService = {
       return false;
     }
 
-    try {
-      const message = {
-        token: fcmToken,
-        // Data payload - always delivered even if app is killed
-        data: {
-          type: 'incoming_call',
-          callId: callData.callId,
-          userId: callData.userId, // ADD
-          responderId: callData.responderId, // ADD
-          callerId: callData.callerId,
-          callerName: callData.callerName,
-          callType: callData.callType,
-          zegoRoomId: callData.zegoRoomId,
-          // Timestamp for deduplication on client
-          timestamp: Date.now().toString(),
-        },
-        // Notification payload - shows in notification tray
+    const message = {
+      token: fcmToken,
+      // Data payload - always delivered even if app is killed
+      data: {
+        type: 'incoming_call',
+        callId: callData.callId,
+        userId: callData.userId, // ADD
+        responderId: callData.responderId, // ADD
+        callerId: callData.callerId,
+        callerName: callData.callerName,
+        callType: callData.callType,
+        zegoRoomId: callData.zegoRoomId,
+        // Timestamp for deduplication on client
+        timestamp: Date.now().toString(),
+      },
+      // Notification payload - shows in notification tray
+      notification: {
+        title: `Incoming ${callData.callType} call`,
+        body: `${callData.callerName} is calling you`,
+      },
+      // Android specific configuration
+      android: {
+        priority: 'high' as const,
+        ttl: 30000, // 30 seconds - call times out anyway
         notification: {
-          title: `Incoming ${callData.callType} call`,
-          body: `${callData.callerName} is calling you`,
+          channelId: 'incoming_calls', // Must match Flutter channel
+          priority: 'max' as const,
+          sound: 'default',
+          defaultVibrateTimings: true,
+          visibility: 'public' as const,
+          // Full-screen intent for incoming calls
+          tag: callData.callId, // Prevents duplicate notifications
         },
-        // Android specific configuration
-        android: {
-          priority: 'high' as const,
-          ttl: 30000, // 30 seconds - call times out anyway
-          notification: {
-            channelId: 'incoming_calls', // Must match Flutter channel
-            priority: 'max' as const,
-            sound: 'default',
-            defaultVibrateTimings: true,
-            visibility: 'public' as const,
-            // Full-screen intent for incoming calls
-            tag: callData.callId, // Prevents duplicate notifications
-          },
+      },
+      // APNs (iOS) specific configuration
+      apns: {
+        headers: {
+          'apns-priority': '10', // High priority
+          'apns-push-type': 'alert',
         },
-        // APNs (iOS) specific configuration
-        apns: {
-          headers: {
-            'apns-priority': '10', // High priority
-            'apns-push-type': 'alert',
-          },
-          payload: {
-            aps: {
-              alert: {
-                title: `Incoming ${callData.callType} call`,
-                body: `${callData.callerName} is calling you`,
-              },
-              sound: 'default',
-              badge: 1,
-              'content-available': 1,
+        payload: {
+          aps: {
+            alert: {
+              title: `Incoming ${callData.callType} call`,
+              body: `${callData.callerName} is calling you`,
             },
+            sound: 'default',
+            badge: 1,
+            'content-available': 1,
           },
         },
-      };
+      },
+    };
 
-      const response = await admin.messaging().send(message);
-      logger.info({ callId: callData.callId, messageId: response }, 'Push notification sent successfully');
-      return true;
-    } catch (error: any) {
-      // Don't throw - push notifications are best-effort
-      // Socket notifications will still work for foreground apps
-      if (error.code === 'messaging/registration-token-not-registered') {
-        logger.warn({ fcmToken: fcmToken.substring(0, 20) + '...' }, 'FCM token invalid/expired - invalidating in database');
-        // CRITICAL: Remove invalid token from database to prevent future failures
-        // This runs async in background to not block the call flow
-        const User = require('../models/User').User;
-        User.updateOne({ fcmToken }, { $unset: { fcmToken: 1 } }).catch((err: any) => {
-          logger.error({ error: err }, 'Failed to invalidate FCM token in database');
-        });
-      } else if (error.code === 'messaging/invalid-argument') {
-        logger.warn({ error: error.message }, 'Invalid FCM message format');
-      } else {
-        logger.error({ error }, 'Failed to send push notification');
+    // RETRY LOGIC: For transient failures under high load
+    const maxRetries = 2;
+    let lastError: any;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await admin.messaging().send(message);
+
+        if (attempt > 0) {
+          logger.info({
+            callId: callData.callId,
+            attempt,
+            messageId: response
+          }, '✅ FCM succeeded on retry');
+        } else {
+          logger.info({
+            callId: callData.callId,
+            messageId: response
+          }, 'Push notification sent successfully');
+        }
+
+        return true;
+      } catch (error: any) {
+        lastError = error;
+
+        // Check if error is retryable
+        const isRetryable =
+          error.code === 'messaging/server-unavailable' ||
+          error.code === 'messaging/internal-error' ||
+          (error.message && error.message.includes('timeout'));
+
+        if (isRetryable && attempt < maxRetries - 1) {
+          const delayMs = 50 * Math.pow(2, attempt); // 50ms, 100ms
+          logger.warn({
+            callId: callData.callId,
+            attempt,
+            error: error.code,
+            retryInMs: delayMs
+          }, '⚠️ FCM failed, retrying...');
+
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue; // Retry
+        }
+
+        // Not retryable or max retries reached - break and handle error
+        break;
       }
-      return false;
     }
+
+    // All retries failed - handle permanent errors
+    if (lastError.code === 'messaging/registration-token-not-registered') {
+      logger.warn({ fcmToken: fcmToken.substring(0, 20) + '...' }, 'FCM token invalid/expired - invalidating in database');
+      // CRITICAL: Remove invalid token from database to prevent future failures
+      // This runs async in background to not block the call flow
+      const User = require('../models/User').User;
+      User.updateOne({ fcmToken }, { $unset: { fcmToken: 1 } }).catch((err: any) => {
+        logger.error({ error: err }, 'Failed to invalidate FCM token in database');
+      });
+    } else if (lastError.code === 'messaging/invalid-argument') {
+      logger.warn({ error: lastError.message }, 'Invalid FCM message format');
+    } else {
+      logger.error({
+        error: lastError,
+        callId: callData.callId,
+        attempts: maxRetries
+      }, '❌ FCM failed after all retries');
+    }
+
+    return false;
   },
 
   /**
