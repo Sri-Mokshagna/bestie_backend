@@ -6,6 +6,7 @@ import { asyncHandler } from '../../lib/asyncHandler';
 const router = Router();
 
 router.post('/initiate', authenticate, asyncHandler(callController.initiateCall));
+router.get('/my-ringing', authenticate, asyncHandler(callController.getMyRingingCalls)); // OPTION 2 FIX: Get ringing calls for responder
 router.post('/:callId/accept', authenticate, asyncHandler(callController.acceptCall));
 router.post('/:callId/reject', authenticate, asyncHandler(callController.rejectCall));
 router.post('/:callId/end', authenticate, asyncHandler(callController.endCall));

@@ -293,6 +293,43 @@ export const callService = {
           hasActiveSocket ? 'socket-only' : 'NONE',
     }, '📞 Call initiated - notification delivery status');
 
+    // OPTION 1 FIX: Schedule FCM retry if call still RINGING after 5 seconds
+    // DEFENSE: This is ADDITIVE - runs in background, doesn't block response
+    // Only retries FCM, doesn't affect socket or existing call flow
+    if (responderUser.fcmToken) {
+      setTimeout(async () => {
+        try {
+          const currentCall = await Call.findById(call._id);
+          if (currentCall && currentCall.status === CallStatus.RINGING) {
+            logger.info({ callId: String(call._id) }, '🔄 Call still RINGING after 5s - retrying FCM notification');
+            
+            // Retry FCM notification
+            pushNotificationService.sendIncomingCallNotification(
+              responderUser.fcmToken!,
+              {
+                callId: String(call._id),
+                userId: userId,
+                responderId: String(responderUser._id),
+                callerId: userId,
+                callerName,
+                callType: type === CallType.AUDIO ? 'audio' : 'video',
+                zegoRoomId: call.zegoRoomId,
+              }
+            ).then(success => {
+              if (success) {
+                logger.info({ callId: String(call._id) }, '✅ FCM retry successful');
+              }
+            }).catch(err => {
+              logger.warn({ callId: String(call._id), error: err.message }, '⚠️ FCM retry failed');
+            });
+          }
+        } catch (err: any) {
+          // Non-critical - don't crash server
+          logger.debug({ callId: String(call._id), error: err.message }, 'FCM retry check failed (non-critical)');
+        }
+      }, 5000); // 5 second delay
+    }
+
     return call;
   },
 
@@ -1007,6 +1044,30 @@ export const callService = {
 
   generateRoomId(): string {
     return `room_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+  },
+
+  // OPTION 2 FIX: Get RINGING calls for a responder
+  // DEFENSE: READ-ONLY - doesn't modify any data, just queries
+  // Used by client to check for missed calls on app resume
+  async getMyRingingCalls(responderId: string) {
+    const thirtySecondsAgo = new Date(Date.now() - 30000); // Only recent calls
+    
+    const calls = await Call.find({
+      responderId: responderId,
+      status: CallStatus.RINGING,
+      createdAt: { $gt: thirtySecondsAgo }, // Only calls within last 30 seconds
+    })
+    .sort({ createdAt: -1 })
+    .limit(1) // Only need the most recent one
+    .populate('userId', 'phone profile.name')
+    .lean();
+    
+    // Map to include caller information
+    return calls.map(call => ({
+      ...call,
+      _id: String(call._id),
+      callerName: (call.userId as any)?.profile?.name || (call.userId as any)?.phone || 'Unknown',
+    }));
   },
 
   async cleanupStaleCalls() {

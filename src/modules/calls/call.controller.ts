@@ -180,4 +180,15 @@ export const callController = {
     const result = await callService.cleanupStaleCalls();
     res.json({ message: 'Cleanup completed', ...result });
   },
+
+  // OPTION 2 FIX: Get RINGING calls for responder (for app resume check)
+  // DEFENSE: READ-ONLY endpoint - doesn't modify any state
+  async getMyRingingCalls(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const calls = await callService.getMyRingingCalls(req.user.id);
+    res.json({ calls });
+  },
 };
