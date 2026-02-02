@@ -101,6 +101,26 @@ export class CoinService {
     recipientId: string,
     chatId: string
   ): Promise<{ balance: number; coinsDeducted: number }> {
+    // ==========================================
+    // DISABLED: Chat is now FREE - no coin deduction
+    // ==========================================
+    logger.info({
+      msg: '💬 Chat message - FREE (coin deduction disabled)',
+      senderId,
+      recipientId,
+      chatId,
+    });
+
+    // Get sender's current balance (for display purposes only)
+    const sender = await User.findById(senderId).select('coinBalance');
+
+    return {
+      balance: sender?.coinBalance || 0,
+      coinsDeducted: 0, // No coins deducted - chat is free!
+    };
+    // ==========================================
+
+    /* ORIGINAL CODE - COMMENTED OUT FOR FREE CHAT
     // CRITICAL: Get config and commission BEFORE starting transaction
     // This prevents transaction conflicts that cause 5-second delays
     const [config, responderPercentage] = await Promise.all([
@@ -269,6 +289,7 @@ export class CoinService {
     } finally {
       session.endSession();
     }
+    */ // End of commented code
   }
 
   /**
