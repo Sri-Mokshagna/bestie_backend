@@ -163,8 +163,9 @@ export const callService = {
       const callAge = now.getTime() - activeCall.createdAt.getTime();
 
       // Auto-cleanup stale calls based on status
-      if (activeCall.status === CallStatus.RINGING && callAge > 60000) {
-        // RINGING calls older than 60 seconds - mark as missed
+      if (activeCall.status === CallStatus.RINGING && callAge > 90000) { // FIX #4: Increased to 90s (was 60s)
+        // RINGING calls older than 90 seconds - mark as missed
+        // Buffer accounts for: FCM delivery (5-30s) + user reaction (5-10s) + validation (3-5s)
         logger.info({ callId: String(activeCall._id) }, 'Auto-ending stale RINGING call');
         activeCall.status = CallStatus.MISSED;
         activeCall.endTime = now;
@@ -302,7 +303,7 @@ export const callService = {
           const currentCall = await Call.findById(call._id);
           if (currentCall && currentCall.status === CallStatus.RINGING) {
             logger.info({ callId: String(call._id) }, '🔄 Call still RINGING after 5s - retrying FCM notification');
-            
+
             // Retry FCM notification
             pushNotificationService.sendIncomingCallNotification(
               responderUser.fcmToken!,
@@ -1051,17 +1052,17 @@ export const callService = {
   // Used by client to check for missed calls on app resume
   async getMyRingingCalls(responderId: string) {
     const thirtySecondsAgo = new Date(Date.now() - 30000); // Only recent calls
-    
+
     const calls = await Call.find({
       responderId: responderId,
       status: CallStatus.RINGING,
       createdAt: { $gt: thirtySecondsAgo }, // Only calls within last 30 seconds
     })
-    .sort({ createdAt: -1 })
-    .limit(1) // Only need the most recent one
-    .populate('userId', 'phone profile.name')
-    .lean();
-    
+      .sort({ createdAt: -1 })
+      .limit(1) // Only need the most recent one
+      .populate('userId', 'phone profile.name')
+      .lean();
+
     // Map to include caller information
     return calls.map(call => ({
       ...call,
