@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { User, UserRole } from '../../models/User';
-import { Responder } from '../../models/Responder';
+import { Responder, KycStatus } from '../../models/Responder';
 import { logger } from '../../lib/logger';
 
 // Get responders with voice recordings
@@ -82,11 +82,31 @@ export const verifyVoiceRecording = async (req: Request, res: Response) => {
         }
 
         if (approved) {
-            // APPROVE: Update verification status
+            // APPROVE: Update verification status in User AND activate in Responder
             responder.profile = responder.profile || {};
             responder.profile.voiceVerificationStatus = 'approved';
             responder.profile.voiceVerifiedAt = new Date();
             await responder.save();
+
+            // CRITICAL: Also update Responder model to activate for calls
+            // Without this, responder won't appear in available responders list!
+            const responderDoc = await Responder.findOne({ userId: responderId });
+            if (responderDoc) {
+                responderDoc.kycStatus = KycStatus.VERIFIED; // This makes them active!
+                await responderDoc.save();
+
+                logger.info({
+                    responderId,
+                    responderName: responder.profile?.name || responder.phone,
+                    kycStatus: responderDoc.kycStatus,
+                    action: 'responder_activated'
+                }, '✅ Responder voice approved and activated for calls');
+            } else {
+                logger.warn({
+                    responderId,
+                    responderName: responder.profile?.name || responder.phone,
+                }, '⚠️ Voice approved but no Responder document found - user cannot receive calls!');
+            }
 
             logger.info({
                 responderId,
@@ -106,7 +126,7 @@ export const verifyVoiceRecording = async (req: Request, res: Response) => {
                 }
             });
         } else {
-            // REJECT: Delete the responder account
+            // REJECT: Delete the responder account and ALL related data
             const responderName = responder.profile?.name || responder.phone;
 
             logger.warn({
@@ -116,28 +136,97 @@ export const verifyVoiceRecording = async (req: Request, res: Response) => {
                 action: 'about_to_delete_responder'
             }, 'Admin is about to reject and delete RESPONDER account');
 
-            // Delete responder data if it exists
-            await Responder.findOneAndDelete({ userId: responderId });
+            try {
+                // Import models for cleanup (lazy import to avoid circular dependencies)
+                const { Call } = await import('../../models/Call');
+                const { Chat, Message } = await import('../../models/Chat');
+                const { Transaction } = await import('../../models/Transaction');
+                const { Payout } = await import('../../models/Payout');
 
-            // Delete user account
-            await User.findByIdAndDelete(responderId);
+                // Delete all related data for this responder
+                const cleanupResults = await Promise.allSettled([
+                    // Delete calls where responder was involved
+                    Call.deleteMany({ responderId }),
 
-            logger.warn({
-                responderId,
-                responderName,
-                action: 'voice_rejected_and_deleted'
-            }, 'Admin rejected RESPONDER voice recording and deleted account');
+                    // Delete chats involving this responder
+                    Chat.find({ participants: responderId }).then(async (chats) => {
+                        const chatIds = chats.map(c => c._id);
+                        await Message.deleteMany({ chatId: { $in: chatIds } });
+                        await Chat.deleteMany({ _id: { $in: chatIds } });
+                    }),
 
-            res.json({
-                success: true,
-                message: 'Responder voice recording rejected and account deleted',
-                responder: {
-                    id: responderId,
-                    name: responderName,
-                    role: UserRole.RESPONDER,
-                    status: 'rejected_and_deleted'
+                    // Delete transactions related to this responder
+                    Transaction.deleteMany({ responderId }),
+
+                    // Delete payout requests
+                    Payout.deleteMany({ responderId }),
+
+                    // Delete responder document
+                    Responder.findOneAndDelete({ userId: responderId }),
+                ]);
+
+                // Log cleanup results
+                const failures = cleanupResults.filter(r => r.status === 'rejected');
+                if (failures.length > 0) {
+                    logger.error({
+                        responderId,
+                        responderName,
+                        failures: failures.map(f => f.reason),
+                    }, '⚠️ Some cleanup operations failed during responder deletion');
+                } else {
+                    logger.info({
+                        responderId,
+                        responderName,
+                    }, '✅ All related data cleaned up successfully');
                 }
-            });
+
+                // Finally, delete the user account
+                const deletedUser = await User.findByIdAndDelete(responderId);
+
+                if (!deletedUser) {
+                    logger.error({ responderId }, '❌ User not found or already deleted');
+                    return res.status(404).json({ error: 'Responder not found or already deleted' });
+                }
+
+                logger.warn({
+                    responderId,
+                    responderName,
+                    action: 'voice_rejected_and_deleted',
+                    cleanupSuccess: failures.length === 0
+                }, 'Admin rejected RESPONDER voice recording and deleted account');
+
+                res.json({
+                    success: true,
+                    message: 'Responder voice recording rejected and account deleted',
+                    responder: {
+                        id: responderId,
+                        name: responderName,
+                        role: UserRole.RESPONDER,
+                        status: 'rejected_and_deleted'
+                    }
+                });
+            } catch (cleanupError) {
+                logger.error({
+                    responderId,
+                    responderName,
+                    error: cleanupError,
+                    stack: (cleanupError as Error).stack
+                }, '❌ Critical error during responder deletion cleanup');
+
+                // Still try to delete the user even if cleanup partially failed
+                await User.findByIdAndDelete(responderId);
+
+                res.json({
+                    success: true,
+                    message: 'Responder deleted but some cleanup operations may have failed',
+                    responder: {
+                        id: responderId,
+                        name: responderName,
+                        role: UserRole.RESPONDER,
+                        status: 'rejected_and_deleted'
+                    }
+                });
+            }
         }
     } catch (error) {
         logger.error({ error, responderId: req.params.responderId }, 'Verify voice recording error');
@@ -173,3 +262,58 @@ export const deleteResponderAccount = async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Failed to delete responder' });
     }
 };
+
+// Block/Unblock responder (temporarily suspend without deleting)
+export const blockResponder = async (req: Request, res: Response) => {
+    try {
+        const { responderId } = req.params;
+        const { blocked } = req.body;
+
+        if (typeof blocked !== 'boolean') {
+            return res.status(400).json({ error: 'blocked must be a boolean' });
+        }
+
+        const responder = await User.findById(responderId);
+        if (!responder) {
+            return res.status(404).json({ error: 'Responder not found' });
+        }
+
+        if (responder.role !== UserRole.RESPONDER) {
+            return res.status(400).json({ error: 'User is not a responder' });
+        }
+
+        // Update voice verification status to blocked
+        responder.profile = responder.profile || {};
+        responder.profile.voiceVerificationStatus = blocked ? 'rejected' : 'approved';
+        await responder.save();
+
+        // Update Responder model kycStatus
+        const responderDoc = await Responder.findOne({ userId: responderId });
+        if (responderDoc) {
+            responderDoc.kycStatus = blocked ? KycStatus.REJECTED : KycStatus.VERIFIED;
+            responderDoc.isOnline = false; // Set offline when blocked
+            await responderDoc.save();
+
+            logger.info({
+                responderId,
+                responderName: responder.profile?.name || responder.phone,
+                action: blocked ? 'blocked' : 'unblocked',
+                kycStatus: responderDoc.kycStatus
+            }, `Admin ${blocked ? 'blocked' : 'unblocked'} responder`);
+        }
+
+        res.json({
+            success: true,
+            message: `Responder ${blocked ? 'blocked' : 'unblocked'} successfully`,
+            responder: {
+                id: responder._id,
+                name: responder.profile?.name || responder.phone,
+                status: blocked ? 'blocked' : 'active'
+            }
+        });
+    } catch (error) {
+        logger.error({ error, responderId: req.params.responderId }, 'Block responder error');
+        res.status(500).json({ error: 'Failed to block/unblock responder' });
+    }
+};
+
