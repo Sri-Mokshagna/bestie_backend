@@ -6,7 +6,7 @@ import { logger } from '../../lib/logger';
 // Get responders with voice recordings
 export const getRespondersWithVoiceRecordings = async (req: Request, res: Response) => {
     try {
-        const { page = 1, limit = 20 } = req.query;
+        const { page = 1, limit = 1000 } = req.query; // Increased from 20 to 1000 to show all records
 
         const responders = await User.find({
             role: UserRole.RESPONDER,
