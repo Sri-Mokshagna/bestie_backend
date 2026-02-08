@@ -36,7 +36,7 @@ export function isValidObjectId(id: string): boolean {
  */
 export function serializeUser(user: any) {
   if (!user) return null;
-  
+
   return {
     id: toStringId(user._id),
     phone: user.phone,
@@ -76,6 +76,9 @@ export function serializeResponder(responder: any, user: any) {
       totalCalls: responder.totalCalls || 0,
       isOnline: user?.isOnline || false,
       isAvailable: user?.isAvailable || true,
+      audioEnabled: responder.audioEnabled ?? true, // FIX ISSUE #3: For sorting
+      videoEnabled: responder.videoEnabled ?? true, // FIX ISSUE #3: For sorting  
+      chatEnabled: responder.chatEnabled ?? true, // FIX ISSUE #3: For sorting
       earnings: {
         totalCoins: responder.earnings?.totalCoins || 0,
         pendingCoins: responder.earnings?.pendingCoins || 0,

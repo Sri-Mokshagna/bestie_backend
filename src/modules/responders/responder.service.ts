@@ -34,10 +34,49 @@ export const responderService = {
     const users = await User.find({ _id: { $in: userIds } }).lean();
     const userMap = new Map(users.map(u => [u._id.toString(), u]));
 
-    const respondersWithUsers = responders.map((responder) => {
+    let respondersWithUsers = responders.map((responder) => {
       const user = userMap.get(responder.userId.toString()) || null;
       // Use serializer to properly format the response
       return serializeResponder(responder, user);
+    });
+
+    // FIX ISSUE #3: Sort by availability (4-tier system)
+    // Tier 1: All 3 enabled (audio + video + chat)
+    // Tier 2: Any 2 enabled
+    // Tier 3: Any 1 enabled
+    // Tier 4: None enabled
+    // Note: Serializer returns { id, userId, user, responder: {...} }
+    // Raw responder has audioEnabled/videoEnabled/chatEnabled before serialization
+    const getAvailabilityTier = (item: any) => {
+      // Try both serialized and raw responder object
+      const r = item.responder || item;
+      const audio = r.audioEnabled || false;
+      const video = r.videoEnabled || false;
+      const chat = r.chatEnabled || false;
+      const count = (audio ? 1 : 0) + (video ? 1 : 0) + (chat ? 1 : 0);
+
+      if (count === 3) return 1; // All 3
+      if (count === 2) return 2; // Any 2
+      if (count === 1) return 3; // Any 1
+      return 4; // None
+    };
+
+    // Sort by tier (lower tier = better), then by online status, then by rating
+    respondersWithUsers.sort((a, b) => {
+      const tierA = getAvailabilityTier(a);
+      const tierB = getAvailabilityTier(b);
+
+      if (tierA !== tierB) return tierA - tierB;
+
+      // Within same tier, prioritize online (from nested responder object)
+      const aOnline = a.responder?.isOnline || false;
+      const bOnline = b.responder?.isOnline || false;
+      if (aOnline !== bOnline) return bOnline ? 1 : -1;
+
+      // Within same tier and online status, prioritize rating
+      const aRating = a.responder?.rating || 0;
+      const bRating = b.responder?.rating || 0;
+      return bRating - aRating;
     });
 
     // If user has a language preference, prioritize responders with the same language

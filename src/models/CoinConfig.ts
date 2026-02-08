@@ -22,7 +22,11 @@ export interface ICoinConfig extends Document {
   responderCommissionPercentage: number; // Percentage of coins responder earns
 
   // Coin to INR conversion for redemption
-  coinsToINRRate: number; // How many INR per coin
+  coinsToINRRate: number; // How many INR per coin (for chat and other features)
+
+  // FIX ISSUE #6: Separate coin-to-INR rates for audio and video calls
+  audioCallCoinToInrRate: number; // INR per coin for audio calls (responder payout)
+  videoCallCoinToInrRate: number; // INR per coin for video calls (responder payout)
 
   // Feature flags
   chatEnabled: boolean;
@@ -79,7 +83,20 @@ const coinConfigSchema = new Schema<ICoinConfig>(
       type: Number,
       required: true,
       min: 0,
-      default: 1, // 1 coin = 1 INR by default
+      default: 1, // 1 coin = 1 INR by default (for chat/other)
+    },
+    // FIX ISSUE #6: Separate rates for audio and video call payouts
+    audioCallCoinToInrRate: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0.1, // Default: 10 coins = ₹1 for audio
+    },
+    videoCallCoinToInrRate: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0.1, // Default: 10 coins = ₹1 for video
     },
     chatEnabled: {
       type: Boolean,

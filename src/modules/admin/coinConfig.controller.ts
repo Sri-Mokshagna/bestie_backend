@@ -24,6 +24,8 @@ export const getCoinConfig = asyncHandler(async (req: AuthRequest, res: Response
       responderMinRedeemCoins: config.responderMinRedeemCoins,
       responderCommissionPercentage: config.responderCommissionPercentage,
       coinsToINRRate: config.coinsToINRRate,
+      audioCallCoinToInrRate: config.audioCallCoinToInrRate, // FIX ISSUE #6
+      videoCallCoinToInrRate: config.videoCallCoinToInrRate, // FIX ISSUE #6
       chatEnabled: config.chatEnabled,
       audioCallEnabled: config.audioCallEnabled,
       videoCallEnabled: config.videoCallEnabled,
@@ -42,6 +44,8 @@ export const updateCoinConfig = asyncHandler(async (req: AuthRequest, res: Respo
     responderMinRedeemCoins,
     responderCommissionPercentage,
     coinsToINRRate,
+    audioCallCoinToInrRate, // FIX ISSUE #6
+    videoCallCoinToInrRate, // FIX ISSUE #6
     chatEnabled,
     audioCallEnabled,
     videoCallEnabled,
@@ -72,6 +76,13 @@ export const updateCoinConfig = asyncHandler(async (req: AuthRequest, res: Respo
   if (coinsToINRRate !== undefined && coinsToINRRate < 0) {
     throw new AppError(400, 'Coins to INR rate must be non-negative');
   }
+  // FIX ISSUE #6: Validate new rate fields
+  if (audioCallCoinToInrRate !== undefined && audioCallCoinToInrRate < 0) {
+    throw new AppError(400, 'Audio call coin to INR rate must be non-negative');
+  }
+  if (videoCallCoinToInrRate !== undefined && videoCallCoinToInrRate < 0) {
+    throw new AppError(400, 'Video call coin to INR rate must be non-negative');
+  }
 
   // Get current active config
   let config = await CoinConfig.findOne({ isActive: true });
@@ -79,13 +90,15 @@ export const updateCoinConfig = asyncHandler(async (req: AuthRequest, res: Respo
   if (!config) {
     // Create new config if none exists
     config = new CoinConfig({
-      chatCoinsPerMessage: chatCoinsPerMessage ?? 3,
+      chatCoinsPerMessage: chatCoinsPerMessage ?? 2,
       audioCallCoinsPerMinute: audioCallCoinsPerMinute ?? 10,
-      videoCallCoinsPerMinute: videoCallCoinsPerMinute ?? 60,
+      videoCallCoinsPerMinute: videoCallCoinsPerMinute ?? 50,
       initialUserCoins: initialUserCoins ?? 10,
       responderMinRedeemCoins: responderMinRedeemCoins ?? 5,
       responderCommissionPercentage: responderCommissionPercentage ?? 70,
       coinsToINRRate: coinsToINRRate ?? 1,
+      audioCallCoinToInrRate: audioCallCoinToInrRate ?? 0.1, // FIX ISSUE #6
+      videoCallCoinToInrRate: videoCallCoinToInrRate ?? 0.1, // FIX ISSUE #6
       chatEnabled: chatEnabled ?? true,
       audioCallEnabled: audioCallEnabled ?? true,
       videoCallEnabled: videoCallEnabled ?? true,
@@ -101,6 +114,8 @@ export const updateCoinConfig = asyncHandler(async (req: AuthRequest, res: Respo
     if (responderMinRedeemCoins !== undefined) config.responderMinRedeemCoins = responderMinRedeemCoins;
     if (responderCommissionPercentage !== undefined) config.responderCommissionPercentage = responderCommissionPercentage;
     if (coinsToINRRate !== undefined) config.coinsToINRRate = coinsToINRRate;
+    if (audioCallCoinToInrRate !== undefined) config.audioCallCoinToInrRate = audioCallCoinToInrRate; // FIX ISSUE #6
+    if (videoCallCoinToInrRate !== undefined) config.videoCallCoinToInrRate = videoCallCoinToInrRate; // FIX ISSUE #6
     if (chatEnabled !== undefined) config.chatEnabled = chatEnabled;
     if (audioCallEnabled !== undefined) config.audioCallEnabled = audioCallEnabled;
     if (videoCallEnabled !== undefined) config.videoCallEnabled = videoCallEnabled;
@@ -122,6 +137,8 @@ export const updateCoinConfig = asyncHandler(async (req: AuthRequest, res: Respo
       responderMinRedeemCoins: config.responderMinRedeemCoins,
       responderCommissionPercentage: config.responderCommissionPercentage,
       coinsToINRRate: config.coinsToINRRate,
+      audioCallCoinToInrRate: config.audioCallCoinToInrRate, // FIX ISSUE #6
+      videoCallCoinToInrRate: config.videoCallCoinToInrRate, // FIX ISSUE #6
       chatEnabled: config.chatEnabled,
       audioCallEnabled: config.audioCallEnabled,
       videoCallEnabled: config.videoCallEnabled,
