@@ -36,14 +36,12 @@ export class CommissionController {
         responderCommissionPercentage,
         adminCommissionPercentage,
         coinToINRRate,
+        audioCallCoinToInrRate,
+        videoCallCoinToInrRate,
         minimumRedemptionCoins,
       } = req.body;
 
       // Validate percentages add up to 100
-      if (responderCommissionPercentage + adminCommissionPercentage !== 100) {
-        throw new AppError(400, 'Commission percentages must add up to 100%');
-      }
-
       // Validate ranges
       if (responderCommissionPercentage < 0 || responderCommissionPercentage > 100) {
         throw new AppError(400, 'Responder commission percentage must be between 0 and 100');

@@ -3,7 +3,9 @@ import { Schema, model, Document } from 'mongoose';
 export interface ICommissionConfig extends Document {
   responderCommissionPercentage: number;
   adminCommissionPercentage: number;
-  coinToINRRate: number; // How much 1 coin is worth in INR for redemption
+  coinToINRRate: number; // How much 1 coin is worth in INR for redemption (deprecated - use call-specific rates)
+  audioCallCoinToInrRate: number; // Coin to INR rate for audio calls (responder earnings)
+  videoCallCoinToInrRate: number; // Coin to INR rate for video calls (responder earnings)
   minimumRedemptionCoins: number;
   firstTimeBonusPercentage: number; // Bonus percentage for first-time purchases on tagged plans
   isActive: boolean;
@@ -30,8 +32,20 @@ const commissionConfigSchema = new Schema<ICommissionConfig>(
     coinToINRRate: {
       type: Number,
       required: true,
+      default: 0.1, // Default: 1 coin = ₹0.10 (deprecated - use call-specific rates)
       min: 0,
-      default: 0.1, // 1 coin = 0.1 INR for redemption
+    },
+    audioCallCoinToInrRate: {
+      type: Number,
+      required: true,
+      default: 0.10, // Default: 1 coin = ₹0.10 for audio calls
+      min: 0,
+    },
+    videoCallCoinToInrRate: {
+      type: Number,
+      required: true,
+      default: 0.15, // Default: 1 coin = ₹0.15 for video calls
+      min: 0,
     },
     minimumRedemptionCoins: {
       type: Number,

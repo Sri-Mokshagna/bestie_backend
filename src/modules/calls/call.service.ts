@@ -633,18 +633,19 @@ export const callService = {
 
         // Get commission config (cached)
         const responderPercentage = await commissionService.getResponderPercentage();
-        const coinToINRRate = await commissionService.getCoinToINRRate();
+        // CRITICAL: Get call-type-specific coin-to-INR rate
+        const coinToINRRate = call.type === 'audio'
+          ? await commissionService.getAudioCallCoinToINRRate()
+          : await commissionService.getVideoCallCoinToINRRate();
 
-        // CORRECT CALCULATION ORDER:
-        // 1. First convert ALL coins to rupees (total transaction value in rupees)
-        // 2. Then apply commission percentage to rupees
-        // Example: 10 coins × ₹0.5 = ₹5 total, then 50% commission = ₹2.5 to responder
-        const totalRupees = actualDeduction * coinToINRRate;
-        // Round to 2 decimal places (paisa precision) instead of whole rupees
-        const responderRupees = Math.round(totalRupees * (responderPercentage / 100) * 100) / 100;
-
-        // Calculate coins for logging (reverse calculation)
+        // Calculate responder commission and earnings
+        // 1. Calculate coins earned (for logging)
         const responderCoins = Math.round(actualDeduction * (responderPercentage / 100));
+
+        // 2. Convert total coins to rupees, then apply commission percentage
+        const totalRupees = actualDeduction * coinToINRRate;
+        // Round to 2 decimal places (paisa precision)
+        const responderRupees = Math.round(totalRupees * (responderPercentage / 100) * 100) / 100;
 
         // Credit responder (NOW IN RUPEES, NOT COINS)
         // CRITICAL: Use atomic update to prevent race conditions when multiple calls end simultaneously

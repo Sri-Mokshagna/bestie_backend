@@ -67,6 +67,22 @@ class CommissionService {
   }
 
   /**
+   * Get the coin to INR rate for audio call responder earnings
+   */
+  async getAudioCallCoinToINRRate(): Promise<number> {
+    const config = await this.getConfig();
+    return config.audioCallCoinToInrRate || config.coinToINRRate; // Fallback to general rate
+  }
+
+  /**
+   * Get the coin to INR rate for video call responder earnings
+   */
+  async getVideoCallCoinToINRRate(): Promise<number> {
+    const config = await this.getConfig();
+    return config.videoCallCoinToInrRate || config.coinToINRRate; // Fallback to general rate
+  }
+
+  /**
    * Get minimum redemption coins
    */
   async getMinimumRedemptionCoins(): Promise<number> {

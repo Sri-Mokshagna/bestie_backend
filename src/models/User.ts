@@ -20,7 +20,7 @@ export interface IUserProfile {
   language?: string;
   voiceText?: string;
   voiceBlob?: string;
-  voiceVerificationStatus?: 'pending' | 'approved' | 'rejected';
+  voiceVerificationStatus?: 'pending' | 'approved' | 'rejected' | 'verified'; // 'verified' is legacy, maps to 'approved'
   voiceVerifiedAt?: Date;
 }
 
@@ -101,6 +101,12 @@ const userSchema = new Schema<IUser>(
       language: String,
       voiceText: String,
       voiceBlob: String,
+      voiceVerificationStatus: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected', 'verified'], // 'verified' is legacy
+        default: 'pending',
+      },
+      voiceVerifiedAt: Date,
     },
     password: {
       type: String,

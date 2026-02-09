@@ -23,15 +23,22 @@ export const getRespondersWithVoiceRecordings = async (req: Request, res: Respon
         });
 
         res.json({
-            responders: responders.map(r => ({
-                id: r._id,
-                name: r.profile?.name || r.phone,
-                phone: r.phone,
-                voiceBlob: r.profile?.voiceBlob,
-                voiceText: r.profile?.voiceText,
-                verificationStatus: r.profile?.voiceVerificationStatus || 'pending',
-                createdAt: r.createdAt
-            })),
+            responders: responders.map(r => {
+                // Normalize status: 'verified' should be displayed as 'approved' in frontend
+                // Some responders may have 'verified' status from legacy data
+                const rawStatus = (r.profile?.voiceVerificationStatus as string) || 'pending';
+                const normalizedStatus = rawStatus === 'verified' ? 'approved' : rawStatus;
+
+                return {
+                    id: r._id,
+                    name: r.profile?.name || r.phone,
+                    phone: r.phone,
+                    voiceBlob: r.profile?.voiceBlob,
+                    voiceText: r.profile?.voiceText,
+                    verificationStatus: normalizedStatus,
+                    createdAt: r.createdAt
+                };
+            }),
             pagination: {
                 page: Number(page),
                 limit: Number(limit),

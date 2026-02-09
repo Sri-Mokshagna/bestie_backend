@@ -37,6 +37,8 @@ import paymentRedirectRoutes from './routes/payment-redirect';
 import transactionRoutes from './modules/transactions/transaction.routes';
 import rewardsRoutes from './modules/rewards/rewards.routes';
 import userRoutes from './modules/users/user.routes';
+import { responderCleanupService } from './services/responderCleanupService';
+import { socketTimeoutService } from './services/socketTimeoutService';
 
 const app = express();
 const httpServer = createServer(app);
@@ -208,6 +210,10 @@ async function start() {
 
     // Initialize Firebase
     initializeFirebase();
+
+    // Start background services
+    responderCleanupService.start();
+    socketTimeoutService.initialize(io);
 
     // Start server - Listen on all network interfaces (0.0.0.0)
     const port = typeof PORT === 'string' ? parseInt(PORT) : PORT;
