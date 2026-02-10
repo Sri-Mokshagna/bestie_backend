@@ -15,6 +15,8 @@ export class CommissionController {
           responderCommissionPercentage: 50,
           adminCommissionPercentage: 50,
           coinToINRRate: 0.1,
+          audioCallCoinToInrRate: 0.10, // Default audio call rate
+          videoCallCoinToInrRate: 0.15, // Default video call rate
           minimumRedemptionCoins: 100,
           isActive: true,
         });

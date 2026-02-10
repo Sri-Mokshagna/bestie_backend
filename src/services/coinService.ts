@@ -101,32 +101,8 @@ export class CoinService {
     recipientId: string,
     chatId: string
   ): Promise<{ balance: number; coinsDeducted: number }> {
-    // ==========================================
-    // DISABLED: Chat is now FREE - no coin deduction
-    // ==========================================
-    logger.info({
-      msg: '💬 Chat message - FREE (coin deduction disabled)',
-      senderId,
-      recipientId,
-      chatId,
-    });
-
-    // Get sender's current balance (for display purposes only)
-    const sender = await User.findById(senderId).select('coinBalance');
-
-    return {
-      balance: sender?.coinBalance || 0,
-      coinsDeducted: 0, // No coins deducted - chat is free!
-    };
-    // ==========================================
-
-    /* ORIGINAL CODE - COMMENTED OUT FOR FREE CHAT
-    // CRITICAL: Get config and commission BEFORE starting transaction
-    // This prevents transaction conflicts that cause 5-second delays
-    const [config, responderPercentage] = await Promise.all([
-      this.getConfig(),
-      commissionService.getResponderPercentage(),
-    ]);
+    // CRITICAL: Get config BEFORE starting transaction
+    const config = await this.getConfig();
 
     if (!config.chatEnabled) {
       throw new AppError(403, 'Chat feature is currently disabled');
@@ -182,7 +158,6 @@ export class CoinService {
       }
 
       // CRITICAL: Use atomic update with balance check to prevent race conditions
-      // This ensures the balance never goes negative even with concurrent requests
       const updateResult = await User.updateOne(
         {
           _id: actualUserId,
@@ -192,7 +167,7 @@ export class CoinService {
         { session }
       );
 
-      // Double-check that the update succeeded (balance was sufficient at transaction time)
+      // Double-check that the update succeeded
       if (updateResult.modifiedCount === 0) {
         logger.error({
           msg: 'Race condition detected: Balance insufficient during transaction',
@@ -203,54 +178,16 @@ export class CoinService {
         throw new AppError(400, 'Insufficient coins', 'INSUFFICIENT_COINS');
       }
 
-
-      // Credit responder
-      // Commission percentage already fetched BEFORE transaction
-      // Get coin to INR rate for converting to rupees
-      const coinToINRRate = await commissionService.getCoinToINRRate();
-
-      // CORRECT CALCULATION ORDER (same as call deduction):
-      // 1. First convert ALL coins to rupees (total transaction value in rupees)
-      // 2. Then apply commission percentage to rupees
-      // Example: 2 coins × ₹0.1 = ₹0.2 total, then 60% commission = ₹0.12 to responder
-      const totalRupees = coinsToDeduct * coinToINRRate;
-      // Round to 2 decimal places (paisa precision) instead of whole rupees
-      const responderRupees = Math.round(totalRupees * (responderPercentage / 100) * 100) / 100;
-
-      // CRITICAL: Use atomic update to prevent race conditions
-      // Update responder earnings in RUPEES (not coins)
-      const responderUpdateResult = await Responder.updateOne(
-        { userId: actualResponderId },
-        {
-          $inc: {
-            'earnings.totalRupees': responderRupees,
-            'earnings.pendingRupees': responderRupees
-          }
-        },
-        { session, upsert: true }
-      );
-
-      // CRITICAL: Verify that responder earnings were actually updated
-      if (responderUpdateResult.modifiedCount === 0 && responderUpdateResult.upsertedCount === 0) {
-        logger.error({
-          chatId,
-          responderId: actualResponderId,
-          responderRupees,
-          coinsToDeduct,
-          updateResult: responderUpdateResult,
-        }, '🚨 CRITICAL: Failed to update responder earnings for chat - payment lost!');
-        throw new Error('Failed to credit responder for chat - database update failed');
-      }
-
+      // CRITICAL: Coins are deducted from user but NOT credited to responder
+      // This is by design - chat messages cost coins but responders don't earn from them
       logger.info({
         chatId,
+        userId: actualUserId,
         responderId: actualResponderId,
-        responderRupees,
-        modified: responderUpdateResult.modifiedCount,
-        upserted: responderUpdateResult.upsertedCount,
-      }, '✅ Responder earnings updated for chat (atomic operation)');
+        coinsDeducted: coinsToDeduct,
+      }, '💬 Chat coins deducted (not paid to responder)');
 
-      // Create transaction record
+      // Create transaction record (no responder earnings)
       await Transaction.create(
         [
           {
@@ -258,14 +195,13 @@ export class CoinService {
             responderId: actualResponderId,
             type: TransactionType.CHAT,
             coins: coinsToDeduct, // User was charged this many coins
-            responderEarnings: responderRupees, // Store actual rupees earned (with paisa precision)
+            responderEarnings: 0, // Responder earns NOTHING from chat
             status: TransactionStatus.COMPLETED,
-            meta: { chatId, senderId },
+            meta: { chatId, senderId, note: 'Chat messages are free for responders' },
           },
         ],
         { session }
       );
-
 
       await session.commitTransaction();
 
@@ -289,7 +225,6 @@ export class CoinService {
     } finally {
       session.endSession();
     }
-    */ // End of commented code
   }
 
   /**
