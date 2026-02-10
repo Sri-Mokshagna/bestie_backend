@@ -15,6 +15,7 @@ router.use(authorize([UserRole.ADMIN]));
 router.get('/', commissionController.getCommissionConfig);
 router.get('/config', commissionController.getCommissionConfig);
 router.put('/config', commissionController.updateCommissionConfig);
+router.put('/commission-settings', commissionController.updateCommissionConfig); // Frontend calls this
 router.get('/history', commissionController.getCommissionHistory);
 
 export default router;

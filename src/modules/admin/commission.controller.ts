@@ -90,6 +90,8 @@ export class CommissionController {
         responderCommissionPercentage,
         adminCommissionPercentage,
         coinToINRRate,
+        audioCallCoinToInrRate: audioCallCoinToInrRate || coinToINRRate,
+        videoCallCoinToInrRate: videoCallCoinToInrRate || coinToINRRate,
         minimumRedemptionCoins,
         isActive: true,
       });
