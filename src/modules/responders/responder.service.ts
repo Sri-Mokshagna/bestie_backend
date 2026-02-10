@@ -98,7 +98,14 @@ export const responderService = {
       });
     } else {
       responder.isOnline = isOnline;
-      responder.lastOnlineAt = new Date();
+
+      // CRITICAL: Update lastOnlineAt ONLY when going OFFLINE
+      // This tracks when responder was last seen online
+      // Used by cleanup service to auto-disable toggles after 2 hours
+      if (!isOnline) {
+        responder.lastOnlineAt = new Date();
+      }
+
       await responder.save();
     }
 
@@ -155,7 +162,12 @@ export const responderService = {
 
     if (updates.isOnline !== undefined) {
       responder.isOnline = updates.isOnline;
-      responder.lastOnlineAt = new Date();
+
+      // CRITICAL: Update lastOnlineAt ONLY when going OFFLINE
+      if (!updates.isOnline) {
+        responder.lastOnlineAt = new Date();
+      }
+
       // Sync User online status
       await User.findByIdAndUpdate(userId, { isOnline: updates.isOnline });
     }
