@@ -45,7 +45,7 @@ async function updateCommissionConfigs() {
         logger.info('✅ Commission configs migration completed successfully');
         process.exit(0);
     } catch (error) {
-        logger.error('❌ Error updating commission configs:', error);
+        logger.error({ error }, '❌ Error updating commission configs');
         process.exit(1);
     }
 }
