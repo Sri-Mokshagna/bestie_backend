@@ -43,9 +43,13 @@ export class CommissionController {
         }
       }
 
+      // Return data in format frontend expects
       res.json({
-        success: true,
-        data: config,
+        responderCommission: config.responderCommissionPercentage,
+        platformCommission: config.adminCommissionPercentage,
+        minPayoutCoins: config.minimumRedemptionCoins,
+        audioCallCoinToInrRate: config.audioCallCoinToInrRate || config.coinToINRRate,
+        videoCallCoinToInrRate: config.videoCallCoinToInrRate || config.coinToINRRate,
       });
     } catch (error) {
       logger.error({ error }, 'Failed to get commission config');
