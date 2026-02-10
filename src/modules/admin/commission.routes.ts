@@ -10,6 +10,9 @@ const router = Router();
 router.use(authenticate);
 router.use(authorize([UserRole.ADMIN]));
 
+// FIX: Frontend calls /api/admin/commission (root) instead of /config
+// Support both endpoints for backward compatibility
+router.get('/', commissionController.getCommissionConfig);
 router.get('/config', commissionController.getCommissionConfig);
 router.put('/config', commissionController.updateCommissionConfig);
 router.get('/history', commissionController.getCommissionHistory);
