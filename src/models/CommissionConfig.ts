@@ -37,13 +37,13 @@ const commissionConfigSchema = new Schema<ICommissionConfig>(
     },
     audioCallCoinToInrRate: {
       type: Number,
-      required: true,
+      required: false, // Optional - will be auto-added if missing
       default: 0.10, // Default: 1 coin = ₹0.10 for audio calls
       min: 0,
     },
     videoCallCoinToInrRate: {
       type: Number,
-      required: true,
+      required: false, // Optional - will be auto-added if missing
       default: 0.15, // Default: 1 coin = ₹0.15 for video calls
       min: 0,
     },
