@@ -9,6 +9,7 @@ const router = Router();
 router.get('/', asyncHandler(responderController.getResponders));
 
 // Responder routes (authenticated) - MUST come before /:responderId
+router.get('/me', authenticate, asyncHandler(responderController.getAvailabilityStatus)); // Get my responder profile with toggle states
 router.patch('/status', authenticate, asyncHandler(responderController.toggleOnlineStatus));
 router.put('/availability', authenticate, asyncHandler(responderController.updateAvailabilityStatus));
 router.get('/availability', authenticate, asyncHandler(responderController.getAvailabilityStatus));
