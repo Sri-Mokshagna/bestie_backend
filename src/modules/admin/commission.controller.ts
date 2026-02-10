@@ -20,6 +20,27 @@ export class CommissionController {
           minimumRedemptionCoins: 100,
           isActive: true,
         });
+      } else {
+        // AUTO-FIX: Add missing fields to existing config without disturbing other values
+        let needsUpdate = false;
+
+        if (!config.audioCallCoinToInrRate) {
+          config.audioCallCoinToInrRate = config.coinToINRRate || 0.10;
+          needsUpdate = true;
+          logger.info({ audioCallCoinToInrRate: config.audioCallCoinToInrRate }, 'Auto-added missing audioCallCoinToInrRate field');
+        }
+
+        if (!config.videoCallCoinToInrRate) {
+          config.videoCallCoinToInrRate = config.coinToINRRate || 0.15;
+          needsUpdate = true;
+          logger.info({ videoCallCoinToInrRate: config.videoCallCoinToInrRate }, 'Auto-added missing videoCallCoinToInrRate field');
+        }
+
+        // Save if we added any missing fields
+        if (needsUpdate) {
+          await config.save();
+          logger.info({ configId: config._id }, '✅ Auto-fixed commission config with missing fields');
+        }
       }
 
       res.json({
