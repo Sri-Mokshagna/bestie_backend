@@ -213,7 +213,8 @@ async function start() {
 
     // Start background services
     responderCleanupService.start();
-    socketTimeoutService.initialize(io);
+    // DISABLED: 24-hour socket timeout removed per user request
+    // socketTimeoutService.initialize(io);
 
     // Start server - Listen on all network interfaces (0.0.0.0)
     const port = typeof PORT === 'string' ? parseInt(PORT) : PORT;
