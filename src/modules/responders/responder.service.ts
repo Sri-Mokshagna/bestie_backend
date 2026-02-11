@@ -174,14 +174,20 @@ export const responderService = {
 
     if (updates.audioEnabled !== undefined) {
       responder.audioEnabled = updates.audioEnabled;
+      // CRITICAL: Sync to User model (call service checks User.audioEnabled)
+      await User.findByIdAndUpdate(userId, { audioEnabled: updates.audioEnabled });
     }
 
     if (updates.videoEnabled !== undefined) {
       responder.videoEnabled = updates.videoEnabled;
+      // CRITICAL: Sync to User model (call service checks User.videoEnabled)
+      await User.findByIdAndUpdate(userId, { videoEnabled: updates.videoEnabled });
     }
 
     if (updates.chatEnabled !== undefined) {
       responder.chatEnabled = updates.chatEnabled;
+      // CRITICAL: Sync to User model (call service checks User.chatEnabled)
+      await User.findByIdAndUpdate(userId, { chatEnabled: updates.chatEnabled });
     }
 
     await responder.save();

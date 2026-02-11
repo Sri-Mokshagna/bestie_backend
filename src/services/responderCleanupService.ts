@@ -16,11 +16,25 @@ class ResponderCleanupService {
         try {
             const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours ago
 
-            // Find responders who:
-            // 1. Are currently offline (isOnline = false)
-            // 2. Haven't been online for 2+ hours (lastOnlineAt < 2 hours ago)
-            // 3. Have at least one toggle enabled
-            const result = await Responder.updateMany(
+            // Find responders who need to be disabled
+            const inactiveResponders = await Responder.find({
+                isOnline: false,
+                lastOnlineAt: { $lt: twoHoursAgo },
+                $or: [
+                    { audioEnabled: true },
+                    { videoEnabled: true },
+                    { chatEnabled: true },
+                ],
+            }).select('userId').lean();
+
+            if (inactiveResponders.length === 0) {
+                return; // No responders to disable
+            }
+
+            const userIds = inactiveResponders.map(r => r.userId);
+
+            // Update Responder model: disable all toggles and set offline
+            const responderResult = await Responder.updateMany(
                 {
                     isOnline: false,
                     lastOnlineAt: { $lt: twoHoursAgo },
@@ -32,6 +46,7 @@ class ResponderCleanupService {
                 },
                 {
                     $set: {
+                        isOnline: false,      // Set offline in Responder model
                         audioEnabled: false,
                         videoEnabled: false,
                         chatEnabled: false,
@@ -39,14 +54,31 @@ class ResponderCleanupService {
                 }
             );
 
-            if (result.modifiedCount > 0) {
+            // CRITICAL: Also update User model so users don't see them as "online"
+            // AND update toggle fields since call service checks User.audioEnabled etc.
+            const userResult = await import('../models/User').then(({ User }) =>
+                User.updateMany(
+                    { _id: { $in: userIds } },
+                    {
+                        $set: {
+                            isOnline: false,
+                            audioEnabled: false,  // CRITICAL: Call service checks these!
+                            videoEnabled: false,
+                            chatEnabled: false,
+                        }
+                    }
+                )
+            );
+
+            if (responderResult.modifiedCount > 0) {
                 logger.info(
                     {
-                        count: result.modifiedCount,
+                        count: responderResult.modifiedCount,
+                        usersUpdated: userResult.modifiedCount,
                         threshold: '2 hours',
                         action: 'auto_disabled_toggles',
                     },
-                    `🔴 Auto-disabled toggles for ${result.modifiedCount} inactive responder(s)`
+                    `🔴 Auto-disabled ${responderResult.modifiedCount} inactive responder(s) and set ${userResult.modifiedCount} user(s) offline`
                 );
             }
         } catch (error) {
