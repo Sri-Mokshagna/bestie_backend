@@ -114,9 +114,16 @@ export function initializeChatSocket(io: SocketServer) {
     socket.on('send_message', async ({ roomId, body }, callback) => {
       try {
         // CRITICAL: Validate authentication
+        // SILENT FAILURE: If not authenticated, log server-side only, don't respond to client
+        // This prevents "Authentication error" from showing to users
+        // Client will timeout and retry, token refresh will happen automatically in background
         if (!socket.userId) {
-          logger.error({ msg: 'Send message: Not authenticated' });
-          // Silently fail - don't show "unauthorized" to user, let them retry
+          logger.error({
+            msg: 'Send message: Not authenticated - silently ignoring (client will retry)',
+            socketId: socket.id,
+            timestamp: new Date().toISOString()
+          });
+          // DO NOT call callback - let client timeout and retry with fresh token
           return;
         }
 
