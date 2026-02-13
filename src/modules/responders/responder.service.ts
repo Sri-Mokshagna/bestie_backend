@@ -99,6 +99,12 @@ export const responderService = {
     } else {
       responder.isOnline = isOnline;
 
+      // DEFENSIVE: If lastOnlineAt is missing, initialize it to prevent null values
+      if (!responder.lastOnlineAt) {
+        responder.lastOnlineAt = new Date();
+        logger.warn({ userId }, 'lastOnlineAt was null, initialized to current time');
+      }
+
       // CRITICAL: Update lastOnlineAt ONLY when going OFFLINE
       // This tracks when responder was last seen online
       // Used by cleanup service to auto-disable toggles after 2 hours
@@ -162,6 +168,12 @@ export const responderService = {
 
     if (updates.isOnline !== undefined) {
       responder.isOnline = updates.isOnline;
+
+      // DEFENSIVE: If lastOnlineAt is missing, initialize it to prevent null values
+      if (!responder.lastOnlineAt) {
+        responder.lastOnlineAt = new Date();
+        logger.warn({ userId }, 'lastOnlineAt was null in updateAvailabilityStatus, initialized to current time');
+      }
 
       // CRITICAL: Update lastOnlineAt ONLY when going OFFLINE
       if (!updates.isOnline) {

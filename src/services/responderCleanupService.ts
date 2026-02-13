@@ -17,13 +17,25 @@ class ResponderCleanupService {
             const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours ago
 
             // Find responders who need to be disabled
+            // FIXED: Removed isOnline: false to catch responders stuck in isOnline: true state
             const inactiveResponders = await Responder.find({
-                isOnline: false,
-                lastOnlineAt: { $lt: twoHoursAgo },
-                $or: [
-                    { audioEnabled: true },
-                    { videoEnabled: true },
-                    { chatEnabled: true },
+                $and: [
+                    {
+                        // Find responders with old or missing lastOnlineAt
+                        $or: [
+                            { lastOnlineAt: { $lt: twoHoursAgo } },
+                            { lastOnlineAt: { $exists: false } },
+                            { lastOnlineAt: null },
+                        ],
+                    },
+                    {
+                        // At least one toggle must be enabled (otherwise nothing to disable)
+                        $or: [
+                            { audioEnabled: true },
+                            { videoEnabled: true },
+                            { chatEnabled: true },
+                        ],
+                    },
                 ],
             }).select('userId').lean();
 
@@ -36,12 +48,21 @@ class ResponderCleanupService {
             // Update Responder model: disable all toggles and set offline
             const responderResult = await Responder.updateMany(
                 {
-                    isOnline: false,
-                    lastOnlineAt: { $lt: twoHoursAgo },
-                    $or: [
-                        { audioEnabled: true },
-                        { videoEnabled: true },
-                        { chatEnabled: true },
+                    $and: [
+                        {
+                            $or: [
+                                { lastOnlineAt: { $lt: twoHoursAgo } },
+                                { lastOnlineAt: { $exists: false } },
+                                { lastOnlineAt: null },
+                            ],
+                        },
+                        {
+                            $or: [
+                                { audioEnabled: true },
+                                { videoEnabled: true },
+                                { chatEnabled: true },
+                            ],
+                        },
                     ],
                 },
                 {
