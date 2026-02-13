@@ -132,9 +132,8 @@ export const responderService = {
     if (isAvailable !== undefined) {
       user.isAvailable = isAvailable;
     }
-    if (!isOnline) {
-      user.lastOnlineAt = new Date();
-    }
+    // CRITICAL: Update lastOnlineAt on EVERY status change to track activity
+    user.lastOnlineAt = new Date();
     await user.save();
 
     return {
@@ -171,9 +170,10 @@ export const responderService = {
     // If all options are disabled, responder goes offline
     const hasAnyEnabled = audioEnabled || videoEnabled || chatEnabled;
     user.isOnline = hasAnyEnabled;
-    if (!hasAnyEnabled) {
-      user.lastOnlineAt = new Date();
-    }
+
+    // CRITICAL: Update lastOnlineAt on EVERY toggle change to track activity
+    // Cleanup service uses this to detect inactive responders
+    user.lastOnlineAt = new Date();
 
     await user.save();
 

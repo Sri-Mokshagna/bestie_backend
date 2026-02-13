@@ -105,12 +105,10 @@ export const responderService = {
         logger.warn({ userId }, 'lastOnlineAt was null, initialized to current time');
       }
 
-      // CRITICAL: Update lastOnlineAt ONLY when going OFFLINE
-      // This tracks when responder was last seen online
-      // Used by cleanup service to auto-disable toggles after 2 hours
-      if (!isOnline) {
-        responder.lastOnlineAt = new Date();
-      }
+      // CRITICAL: Update lastOnlineAt on EVERY status change (online or offline)
+      // This tracks when responder was last active
+      // Used by cleanup service to auto-disable toggles after 2 hours of inactivity
+      responder.lastOnlineAt = new Date();
 
       await responder.save();
     }
@@ -175,10 +173,8 @@ export const responderService = {
         logger.warn({ userId }, 'lastOnlineAt was null in updateAvailabilityStatus, initialized to current time');
       }
 
-      // CRITICAL: Update lastOnlineAt ONLY when going OFFLINE
-      if (!updates.isOnline) {
-        responder.lastOnlineAt = new Date();
-      }
+      // CRITICAL: Update lastOnlineAt on EVERY status change to track activity
+      responder.lastOnlineAt = new Date();
 
       // Sync User online status
       await User.findByIdAndUpdate(userId, { isOnline: updates.isOnline });

@@ -724,7 +724,11 @@ export const callService = {
     await call.save();
 
     // Reset inCall flag for responder in both User and Responder models
-    await User.findByIdAndUpdate(call.responderId, { inCall: false });
+    // CRITICAL: Also update lastOnlineAt to track activity (prevents cleanup from disabling active responders)
+    await User.findByIdAndUpdate(call.responderId, {
+      inCall: false,
+      lastOnlineAt: new Date() // Track call activity
+    });
     await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
 
     // Create call history message
