@@ -404,7 +404,7 @@ export const responderService = {
           reason
         );
       } catch (error) {
-        logger.error('Failed to send rejection notification:', error);
+        logger.error({ err: error }, 'Failed to send rejection notification');
         // Continue with deletion even if notification fails
       }
 
