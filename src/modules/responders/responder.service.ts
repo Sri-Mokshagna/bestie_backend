@@ -379,32 +379,88 @@ export const responderService = {
       throw new AppError(404, 'Responder not found');
     }
 
-    if (responder.kycStatus !== KycStatus.PENDING) {
-      throw new AppError(400, 'Application is not pending');
-    }
-
-    // Get user details
+    // Get user details before deletion
     const user = await User.findById(responder.userId);
     if (!user) {
       throw new AppError(404, 'User not found');
     }
 
-    // Update responder status
-    responder.kycStatus = KycStatus.REJECTED;
-    await responder.save();
+    const responderName = user.profile?.name || user.phone;
+    const responderUserId = responder.userId;
 
-    // Send rejection notification
+    logger.warn({
+      responderId,
+      responderName,
+      responderUserId,
+      action: 'about_to_reject_and_delete'
+    }, 'Admin rejecting and deleting responder account');
+
     try {
-      await notificationService.sendRejectionNotification(
-        responder.userId.toString(),
-        user.profile?.name || 'User',
-        reason
-      );
-    } catch (error) {
-      console.error('Failed to send rejection notification:', error);
-      // Don't fail the rejection if notification fails
-    }
+      // Send rejection notification BEFORE deleting
+      try {
+        await notificationService.sendRejectionNotification(
+          responderUserId.toString(),
+          responderName,
+          reason
+        );
+      } catch (error) {
+        logger.error('Failed to send rejection notification:', error);
+        // Continue with deletion even if notification fails
+      }
 
-    return responder;
+      // Import models for cleanup
+      const { Call } = await import('../../models/Call');
+      const { Chat, Message } = await import('../../models/Chat');
+      const { Transaction } = await import('../../models/Transaction');
+      const { Payout } = await import('../../models/Payout');
+
+      // Delete all related data
+      const cleanupResults = await Promise.allSettled([
+        Call.deleteMany({ responderId: responderUserId }),
+        Chat.find({ participants: responderUserId }).then(async (chats) => {
+          const chatIds = chats.map(c => c._id);
+          await Message.deleteMany({ chatId: { $in: chatIds } });
+          await Chat.deleteMany({ _id: { $in: chatIds } });
+        }),
+        Transaction.deleteMany({ responderId: responderUserId }),
+        Payout.deleteMany({ responderId: responderUserId }),
+        Responder.findByIdAndDelete(responderId),
+      ]);
+
+      // Log cleanup results
+      const failures = cleanupResults.filter(r => r.status === 'rejected');
+      if (failures.length > 0) {
+        logger.error({
+          responderId,
+          responderName,
+          failures: failures.map((f: any) => f.reason),
+        }, '⚠️ Some cleanup operations failed during responder deletion');
+      }
+
+      // Finally, delete the user account
+      await User.findByIdAndDelete(responderUserId);
+
+      logger.warn({
+        responderId,
+        responderName,
+        responderUserId,
+        action: 'responder_rejected_and_deleted'
+      }, '✅ Admin rejected and deleted responder account');
+
+      // Return a placeholder object for response
+      return {
+        _id: responderId,
+        userId: responderUserId,
+        kycStatus: 'deleted',
+        name: responderName
+      };
+    } catch (error) {
+      logger.error({
+        responderId,
+        responderName,
+        error
+      }, '❌ Failed to delete responder');
+      throw new AppError(500, 'Failed to reject and delete responder');
+    }
   },
 };
