@@ -720,7 +720,9 @@ export const callService = {
     // Update call
     call.status = CallStatus.ENDED;
     call.endTime = endTime;
-    call.durationSeconds = durationSeconds;
+    // Only save actual duration when call was truly connected (ACTIVE/ENDED)
+    // For cancelled/ringing calls, duration = 0 so frontend shows missed icon
+    call.durationSeconds = wasCallActive ? durationSeconds : 0;
     await call.save();
 
     // Reset inCall flag for responder in both User and Responder models
