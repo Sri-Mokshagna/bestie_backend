@@ -40,6 +40,7 @@ import userRoutes from './modules/users/user.routes';
 import { responderCleanupService } from './services/responderCleanupService';
 import { socketTimeoutService } from './services/socketTimeoutService';
 import { latencyTracker } from './middleware/latencyTracker';
+import { setupMongooseLatencyTracking, setupGlobalAxiosTracking } from './middleware/serviceLatencyTracker';
 import latencyRoutes from './routes/latency';
 
 const app = express();
@@ -216,6 +217,10 @@ async function start() {
 
     // Initialize Firebase
     initializeFirebase();
+
+    // LATENCY: Enable per-service tracking (MongoDB queries + external HTTP calls)
+    setupMongooseLatencyTracking();  // Times every Mongoose query
+    setupGlobalAxiosTracking();       // Times every axios call (Zego, Firebase, Cashfree)
 
     // Start background services
     responderCleanupService.start();
