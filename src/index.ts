@@ -39,6 +39,8 @@ import rewardsRoutes from './modules/rewards/rewards.routes';
 import userRoutes from './modules/users/user.routes';
 import { responderCleanupService } from './services/responderCleanupService';
 import { socketTimeoutService } from './services/socketTimeoutService';
+import { latencyTracker } from './middleware/latencyTracker';
+import latencyRoutes from './routes/latency';
 
 const app = express();
 const httpServer = createServer(app);
@@ -153,6 +155,9 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+// LATENCY TRACKING: Record response time for every request
+app.use(latencyTracker);
+
 // Health check
 app.get('/healthz', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -181,6 +186,7 @@ app.use('/api/rewards', rewardsRoutes);
 app.use('/api/users', userRoutes);
 app.use('/pay', paymentRedirectRoutes);  // Changed from /payment to avoid Android intent interception
 app.use('/api', healthRoutes);
+app.use('/api/latency', latencyRoutes);
 
 // Initialize Socket.IO
 setSocketIO(io);
