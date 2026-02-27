@@ -42,6 +42,7 @@ import { socketTimeoutService } from './services/socketTimeoutService';
 import { latencyTracker } from './middleware/latencyTracker';
 import { setupMongooseLatencyTracking, setupGlobalAxiosTracking } from './middleware/serviceLatencyTracker';
 import latencyRoutes from './routes/latency';
+import loadTestRoutes from './modules/load-test/load-test.routes';
 
 const app = express();
 const httpServer = createServer(app);
@@ -188,6 +189,7 @@ app.use('/api/users', userRoutes);
 app.use('/pay', paymentRedirectRoutes);  // Changed from /payment to avoid Android intent interception
 app.use('/api', healthRoutes);
 app.use('/api/latency', latencyRoutes);
+app.use('/api/load-test', loadTestRoutes);
 
 // Initialize Socket.IO
 setSocketIO(io);
