@@ -4,7 +4,7 @@
  * Simulates the FULL call lifecycle at scale:
  *   initiate → accept → confirm → (wait) → end
  * 
- * Tests at: 2000, 3000, 4000, 5000, 10000 concurrent call pairs.
+ * Tests at: 2000, 3000, 4000, 5000, 10000, 15000, 20000, 25000 concurrent call pairs.
  * Each "concurrent user" = one call pair (1 user + 1 responder).
  * So 2000 users = 1000 simultaneous call pairs.
  * 
@@ -427,7 +427,7 @@ router.post('/run', async (req: Request, res: Response) => {
     }
 
     const targetUsers = parseInt(req.query.users as string) || 2000;
-    const allowedValues = [2000, 3000, 4000, 5000, 10000];
+    const allowedValues = [2000, 3000, 4000, 5000, 10000, 15000, 20000, 25000];
 
     if (!allowedValues.includes(targetUsers)) {
         return res.status(400).json({
@@ -460,7 +460,8 @@ router.post('/run', async (req: Request, res: Response) => {
 
 /**
  * POST /api/load-test/run-all
- * Run all test levels sequentially: 2000, 3000, 4000, 5000, 10000.
+ * Run all test levels sequentially: 2000 → 25000.
+ * Optional: ?levels=10000,20000,25000 to run specific levels only.
  */
 router.post('/run-all', async (req: Request, res: Response) => {
     if (currentTest) {
@@ -471,14 +472,21 @@ router.post('/run-all', async (req: Request, res: Response) => {
         return res.status(403).json({ error: 'Not allowed in production' });
     }
 
+    const allLevels = [2000, 3000, 4000, 5000, 10000, 15000, 20000, 25000];
+    const customLevels = req.query.levels
+        ? (req.query.levels as string).split(',').map(Number).filter(n => allLevels.includes(n))
+        : allLevels;
+
     res.json({
-        message: 'Running all test levels sequentially: 2000, 3000, 4000, 5000, 10000',
+        message: `Running test levels sequentially: ${customLevels.join(', ')}`,
+        levels: customLevels,
         checkResultsAt: '/api/load-test/results',
+        predictionAt: '/api/load-test/prediction',
     });
 
     // Run all levels sequentially in background
     (async () => {
-        for (const users of [2000, 3000, 4000, 5000, 10000]) {
+        for (const users of customLevels) {
             console.log(`\n${'='.repeat(60)}`);
             console.log(`Starting test level: ${users} users`);
             console.log(`${'='.repeat(60)}`);
@@ -487,6 +495,7 @@ router.post('/run-all', async (req: Request, res: Response) => {
             await new Promise(resolve => setTimeout(resolve, 5000));
         }
         console.log('\n✅ ALL LOAD TESTS COMPLETED');
+        console.log('📈 View predictions at: /api/load-test/prediction');
     })().catch(err => console.error('Run-all error:', err));
 });
 
@@ -614,6 +623,229 @@ router.get('/comparison', (req: Request, res: Response) => {
         totalCompletedTests: comparison.length,
         comparison: comparison.sort((a, b) => a.targetUsers - b.targetUsers),
     });
+});
+
+// ─── Exponential Regression & Prediction ────────────────────────────────────
+
+/**
+ * Fit exponential curve: y = a * e^(b * x)
+ * Uses least-squares on ln(y) = ln(a) + b*x
+ */
+function fitExponential(points: { x: number; y: number }[]): {
+    a: number;
+    b: number;
+    equation: string;
+    rSquared: number;
+} {
+    if (points.length < 2) {
+        return { a: 0, b: 0, equation: 'Not enough data points', rSquared: 0 };
+    }
+
+    // Filter out zero/negative y values (can't take log)
+    const valid = points.filter(p => p.y > 0);
+    if (valid.length < 2) {
+        return { a: 0, b: 0, equation: 'Not enough valid data points', rSquared: 0 };
+    }
+
+    const n = valid.length;
+    const lnY = valid.map(p => Math.log(p.y));
+    const X = valid.map(p => p.x);
+
+    // Linear regression on (x, ln(y))
+    const sumX = X.reduce((a, b) => a + b, 0);
+    const sumLnY = lnY.reduce((a, b) => a + b, 0);
+    const sumXLnY = X.reduce((acc, xi, i) => acc + xi * lnY[i], 0);
+    const sumX2 = X.reduce((acc, xi) => acc + xi * xi, 0);
+
+    const bCoeff = (n * sumXLnY - sumX * sumLnY) / (n * sumX2 - sumX * sumX);
+    const lnA = (sumLnY - bCoeff * sumX) / n;
+    const aCoeff = Math.exp(lnA);
+
+    // R² calculation
+    const meanLnY = sumLnY / n;
+    const ssTotal = lnY.reduce((acc, yi) => acc + (yi - meanLnY) ** 2, 0);
+    const ssResidual = lnY.reduce((acc, yi, i) => {
+        const predicted = lnA + bCoeff * X[i];
+        return acc + (yi - predicted) ** 2;
+    }, 0);
+    const rSquared = ssTotal > 0 ? 1 - ssResidual / ssTotal : 0;
+
+    // Format equation nicely
+    const equation = `y = ${aCoeff.toFixed(4)} × e^(${bCoeff.toExponential(4)} × x)`;
+
+    return {
+        a: parseFloat(aCoeff.toFixed(6)),
+        b: parseFloat(bCoeff.toExponential(6)),
+        equation,
+        rSquared: parseFloat(rSquared.toFixed(6)),
+    };
+}
+
+/**
+ * GET /api/load-test/prediction
+ * 
+ * Fits an exponential curve y = a·e^(bx) to completed test results.
+ * Returns:
+ *   - The fitted equation and R² goodness-of-fit
+ *   - Actual data points from tests
+ *   - Predicted latencies for key user counts (1K → 50K)
+ *   - Ready-to-graph data table
+ */
+router.get('/prediction', (req: Request, res: Response) => {
+    const completed = testResults.filter(t => t.status === 'completed' && t.summary);
+
+    if (completed.length < 2) {
+        return res.status(400).json({
+            error: 'Need at least 2 completed tests to generate prediction',
+            completedTests: completed.length,
+            hint: 'Run tests at different user levels first: POST /api/load-test/run?users=2000',
+        });
+    }
+
+    // Collect data points: users → mean latency
+    const dataPoints = completed.map(t => ({
+        x: t.targetUsers,
+        y: t.summary!.totalMeanMs,
+    }));
+
+    // Also collect P95 data
+    const p95Points = completed.map(t => ({
+        x: t.targetUsers,
+        y: t.summary!.totalP95Ms,
+    }));
+
+    // Also collect max latency data
+    const maxPoints = completed.map(t => ({
+        x: t.targetUsers,
+        y: t.summary!.totalMaxMs,
+    }));
+
+    // Fit exponential curves
+    const meanFit = fitExponential(dataPoints);
+    const p95Fit = fitExponential(p95Points);
+    const maxFit = fitExponential(maxPoints);
+
+    // Generate predictions for key user counts
+    const predictionLevels = [1000, 2000, 3000, 4000, 5000, 7500, 10000, 15000, 20000, 25000, 30000, 40000, 50000];
+
+    const predictions = predictionLevels.map(users => ({
+        users,
+        callPairs: Math.floor(users / 2),
+        predictedMeanMs: parseFloat((meanFit.a * Math.exp(meanFit.b * users)).toFixed(2)),
+        predictedP95Ms: parseFloat((p95Fit.a * Math.exp(p95Fit.b * users)).toFixed(2)),
+        predictedMaxMs: parseFloat((maxFit.a * Math.exp(maxFit.b * users)).toFixed(2)),
+        isExtrapolated: !completed.some(t => t.targetUsers === users),
+    }));
+
+    // Actual test data for comparison
+    const actualData = completed
+        .sort((a, b) => a.targetUsers - b.targetUsers)
+        .map(t => ({
+            users: t.targetUsers,
+            callPairs: t.actualCallPairs,
+            actualMeanMs: t.summary!.totalMeanMs,
+            actualP95Ms: t.summary!.totalP95Ms,
+            actualMaxMs: t.summary!.totalMaxMs,
+            successRate: t.summary!.successRate,
+        }));
+
+    // CSV-ready table for easy graphing
+    const csvHeader = 'users,callPairs,predictedMeanMs,predictedP95Ms,predictedMaxMs,isExtrapolated';
+    const csvRows = predictions.map(p =>
+        `${p.users},${p.callPairs},${p.predictedMeanMs},${p.predictedP95Ms},${p.predictedMaxMs},${p.isExtrapolated}`
+    );
+    const csvTable = [csvHeader, ...csvRows].join('\n');
+
+    res.json({
+        equations: {
+            mean: {
+                equation: meanFit.equation,
+                a: meanFit.a,
+                b: meanFit.b,
+                rSquared: meanFit.rSquared,
+                description: 'Predicts average (mean) latency per call lifecycle',
+            },
+            p95: {
+                equation: p95Fit.equation,
+                a: p95Fit.a,
+                b: p95Fit.b,
+                rSquared: p95Fit.rSquared,
+                description: 'Predicts 95th percentile latency',
+            },
+            max: {
+                equation: maxFit.equation,
+                a: maxFit.a,
+                b: maxFit.b,
+                rSquared: maxFit.rSquared,
+                description: 'Predicts worst-case (max) latency',
+            },
+        },
+        actualData,
+        predictions,
+        csvTable,
+        graphInstructions: {
+            xAxis: 'users (concurrent users)',
+            yAxis: 'latency (milliseconds)',
+            series: [
+                'predictedMeanMs — average call lifecycle time',
+                'predictedP95Ms — 95th percentile (worst 5% of calls)',
+                'predictedMaxMs — absolute worst case',
+            ],
+            howToUse: [
+                'Copy the csvTable field into a .csv file',
+                'Import into Google Sheets / Excel',
+                'Create a scatter chart with users on X-axis and latency on Y-axis',
+                'Or use the equations directly: y = a × e^(b × x)',
+            ],
+        },
+    });
+});
+
+/**
+ * GET /api/load-test/prediction/csv
+ * Download prediction table as CSV for direct import into graphing tools.
+ */
+router.get('/prediction/csv', (req: Request, res: Response) => {
+    const completed = testResults.filter(t => t.status === 'completed' && t.summary);
+
+    if (completed.length < 2) {
+        return res.status(400).json({ error: 'Need at least 2 completed tests' });
+    }
+
+    const dataPoints = completed.map(t => ({ x: t.targetUsers, y: t.summary!.totalMeanMs }));
+    const p95Points = completed.map(t => ({ x: t.targetUsers, y: t.summary!.totalP95Ms }));
+    const maxPoints = completed.map(t => ({ x: t.targetUsers, y: t.summary!.totalMaxMs }));
+
+    const meanFit = fitExponential(dataPoints);
+    const p95Fit = fitExponential(p95Points);
+    const maxFit = fitExponential(maxPoints);
+
+    const levels = [1000, 2000, 3000, 4000, 5000, 7500, 10000, 15000, 20000, 25000, 30000, 40000, 50000];
+
+    // Build CSV with actual + predicted
+    const header = 'users,type,meanMs,p95Ms,maxMs';
+    const rows: string[] = [];
+
+    // Actual data
+    for (const t of completed.sort((a, b) => a.targetUsers - b.targetUsers)) {
+        rows.push(`${t.targetUsers},actual,${t.summary!.totalMeanMs},${t.summary!.totalP95Ms},${t.summary!.totalMaxMs}`);
+    }
+
+    // Predicted data
+    for (const users of levels) {
+        const predMean = (meanFit.a * Math.exp(meanFit.b * users)).toFixed(2);
+        const predP95 = (p95Fit.a * Math.exp(p95Fit.b * users)).toFixed(2);
+        const predMax = (maxFit.a * Math.exp(maxFit.b * users)).toFixed(2);
+        rows.push(`${users},predicted,${predMean},${predP95},${predMax}`);
+    }
+
+    const csv = [header, ...rows].join('\n');
+    const now = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `latency_prediction_${now}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
 });
 
 export default router;

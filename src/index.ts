@@ -43,6 +43,7 @@ import { latencyTracker } from './middleware/latencyTracker';
 import { setupMongooseLatencyTracking, setupGlobalAxiosTracking } from './middleware/serviceLatencyTracker';
 import latencyRoutes from './routes/latency';
 import loadTestRoutes from './modules/load-test/load-test.routes';
+import diagnosticsRoutes from './routes/server-diagnostics';
 
 const app = express();
 const httpServer = createServer(app);
@@ -190,6 +191,7 @@ app.use('/pay', paymentRedirectRoutes);  // Changed from /payment to avoid Andro
 app.use('/api', healthRoutes);
 app.use('/api/latency', latencyRoutes);
 app.use('/api/load-test', loadTestRoutes);
+app.use('/api/diagnostics', diagnosticsRoutes);
 
 // Initialize Socket.IO
 setSocketIO(io);

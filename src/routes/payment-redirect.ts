@@ -79,7 +79,7 @@ async function recreatePaymentSession(payment: any): Promise<string | null> {
 
     const serverUrl = process.env.SERVER_URL ||
       (process.env.NODE_ENV === 'production'
-        ? 'https://bestie-backend-zmj2.onrender.com'
+        ? 'https://bestie-backend-prod.onrender.com'
         : 'http://localhost:3000');
 
     // Generate customer email
@@ -746,7 +746,7 @@ function renderPaymentPage(options: {
   const checkoutUrl = `${cashfreeBaseUrl}/#${paymentSessionId}`;
 
   // Server URL for deep link
-  const serverUrl = process.env.SERVER_URL || 'https://bestie-backend-zmj2.onrender.com';
+  const serverUrl = process.env.SERVER_URL || 'https://bestie-backend-prod.onrender.com';
 
   return `
     <!DOCTYPE html>

@@ -71,7 +71,7 @@ export class PaymentService {
       // Get server URL for return/webhook URLs
       const serverUrl = process.env.SERVER_URL ||
         (process.env.NODE_ENV === 'production'
-          ? 'https://bestie-backend-zmj2.onrender.com'
+          ? 'https://bestie-backend-prod.onrender.com'
           : 'http://localhost:3000');
 
       logger.info({
