@@ -387,6 +387,34 @@ export function initializeChatSocket(io: SocketServer) {
       }
     });
 
+    // MARK READ: Set readAt on unread messages when recipient opens the chat
+    // ADDITIVE: Purely new handler — doesn't modify any existing event or query
+    socket.on('mark_read', async ({ chatId }) => {
+      if (!socket.userId || !chatId) return;
+
+      try {
+        const result = await Message.updateMany(
+          {
+            chatId: new Types.ObjectId(chatId),
+            senderId: { $ne: new Types.ObjectId(socket.userId) }, // Only partner's messages
+            readAt: null, // Only unread ones
+          },
+          { $set: { readAt: new Date() } }
+        );
+
+        if (result.modifiedCount > 0) {
+          logger.info({
+            chatId,
+            userId: socket.userId,
+            markedCount: result.modifiedCount,
+          }, '✅ Marked messages as read');
+        }
+      } catch (error) {
+        // Non-critical — don't break anything
+        logger.error({ error, chatId, userId: socket.userId }, 'mark_read failed');
+      }
+    });
+
     socket.on('typing', ({ roomId }) => {
       socket.to(roomId).emit('typing', { userId: socket.userId });
     });
