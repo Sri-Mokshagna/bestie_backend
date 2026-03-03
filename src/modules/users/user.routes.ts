@@ -7,6 +7,9 @@ const router = Router();
 // All routes require authentication
 router.use(authenticate);
 
+// Get all users (for responder to discover and message)
+router.get('/list', userController.getAllUsers);
+
 // Get blocked users
 router.get('/blocked', userController.getBlockedUsers);
 

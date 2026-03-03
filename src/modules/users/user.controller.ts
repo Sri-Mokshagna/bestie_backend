@@ -1,6 +1,35 @@
 import { Request, Response } from 'express';
-import { User } from '../../models/User';
+import { User, UserRole } from '../../models/User';
 import { Call } from '../../models/Call';
+
+// Get all users (for responder to discover and message)
+export const getAllUsers = async (req: Request, res: Response) => {
+    try {
+        // Only responders should access this
+        if (req.user?.role !== UserRole.RESPONDER) {
+            return res.status(403).json({ error: 'Only responders can access user list' });
+        }
+
+        const users = await User.find({
+            role: UserRole.USER,
+        })
+            .select('phone profile.name profile.avatar')
+            .sort({ 'profile.name': 1 })
+            .lean();
+
+        res.json({
+            users: users.map((u: any) => ({
+                id: u._id.toString(),
+                phone: u.phone,
+                name: u.profile?.name || u.phone,
+                avatar: u.profile?.avatar || null,
+            })),
+        });
+    } catch (error) {
+        console.error('Get all users error:', error);
+        res.status(500).json({ error: 'Failed to fetch users' });
+    }
+};
 
 // Get blocked users
 export const getBlockedUsers = async (req: Request, res: Response) => {
