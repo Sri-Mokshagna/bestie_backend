@@ -14,6 +14,10 @@ import { pushNotificationService } from '../../services/pushNotificationService'
 // Store active call timers to cancel if call ends early
 const callTimers = new Map<string, NodeJS.Timeout>();
 
+// FIX: Store FCM retry timers so they can be cancelled when call ends
+// Without this, a cancelled call still fires a delayed FCM notification to responder
+const fcmRetryTimers = new Map<string, NodeJS.Timeout>();
+
 export const callService = {
   async initiateCall(userId: string, responderId: string, type: CallType) {
     // PERFORMANCE: Parallel fetch of user and config
@@ -298,7 +302,9 @@ export const callService = {
     // DEFENSE: This is ADDITIVE - runs in background, doesn't block response
     // Only retries FCM, doesn't affect socket or existing call flow
     if (responderUser.fcmToken) {
-      setTimeout(async () => {
+      // FIX: Store FCM retry timer so it can be cancelled if call ends before 5s
+      const fcmRetryTimer = setTimeout(async () => {
+        fcmRetryTimers.delete(String(call._id)); // Cleanup timer reference
         try {
           const currentCall = await Call.findById(call._id);
           if (currentCall && currentCall.status === CallStatus.RINGING) {
@@ -323,12 +329,16 @@ export const callService = {
             }).catch(err => {
               logger.warn({ callId: String(call._id), error: err.message }, '⚠️ FCM retry failed');
             });
+          } else {
+            logger.info({ callId: String(call._id), status: currentCall?.status }, '⏭️ FCM retry skipped - call no longer RINGING');
           }
         } catch (err: any) {
           // Non-critical - don't crash server
           logger.debug({ callId: String(call._id), error: err.message }, 'FCM retry check failed (non-critical)');
         }
       }, 5000); // 5 second delay
+
+      fcmRetryTimers.set(String(call._id), fcmRetryTimer);
     }
 
     return call;
@@ -853,6 +863,14 @@ export const callService = {
       clearTimeout(timer);
       callTimers.delete(String(call._id));
       logger.info({ callId: String(call._id) }, 'Cancelled scheduled call termination');
+    }
+
+    // FIX: Cancel pending FCM retry to prevent sending notification for cancelled call
+    const fcmTimer = fcmRetryTimers.get(String(call._id));
+    if (fcmTimer) {
+      clearTimeout(fcmTimer);
+      fcmRetryTimers.delete(String(call._id));
+      logger.info({ callId: String(call._id) }, '🛑 Cancelled pending FCM retry notification');
     }
 
     // PERFORMANCE FIX: Emit socket events IMMEDIATELY before any slow operations
