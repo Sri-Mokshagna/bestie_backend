@@ -45,13 +45,11 @@ async function testCallHistoryResponse() {
             console.log('\n   👤 User Data:');
             console.log(`      id: ${call.user.id}`);
             console.log(`      name: "${call.user.name}"`);
-            console.log(`      phone: "${call.user.phone}"`);
             console.log(`      avatar: ${call.user.avatar}`);
 
             console.log('\n   🎯 Responder Data:');
             console.log(`      id: ${call.responder.id}`);
             console.log(`      name: "${call.responder.name}"`);
-            console.log(`      phone: "${call.responder.phone}"`);
             console.log(`      avatar: ${call.responder.avatar}`);
 
             // Check for issues
@@ -61,9 +59,6 @@ async function testCallHistoryResponse() {
             }
             if (!call.responder.name || call.responder.name === 'unknown') {
                 issues.push('❌ Responder name is missing or unknown');
-            }
-            if (!call.responder.phone || call.responder.phone === '') {
-                issues.push('⚠️  Responder phone is empty');
             }
             if (!call.responder.id || call.responder.id === 'unknown') {
                 issues.push('❌ Responder ID is missing');

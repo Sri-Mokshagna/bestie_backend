@@ -13,15 +13,14 @@ export const getAllUsers = async (req: Request, res: Response) => {
         const users = await User.find({
             role: UserRole.USER,
         })
-            .select('phone profile.name profile.avatar')
+            .select('profile.name profile.avatar')
             .sort({ 'profile.name': 1 })
             .lean();
 
         res.json({
             users: users.map((u: any) => ({
                 id: u._id.toString(),
-                phone: u.phone,
-                name: u.profile?.name || u.phone,
+                name: u.profile?.name || 'User',
                 avatar: u.profile?.avatar || null,
             })),
         });

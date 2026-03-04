@@ -210,8 +210,8 @@ export const callService = {
     });
 
     // Get names for display
-    const callerName = user.profile?.name || user.phone || 'Unknown';
-    const receiverName = responderUser.profile?.name || responderUser.phone || 'Responder';
+    const callerName = user.profile?.name || 'Someone';
+    const receiverName = responderUser.profile?.name || 'Responder';
 
     // NOTIFICATION STRATEGY: Dual-path for maximum reliability
     // Send BOTH socket and FCM simultaneously - whichever delivers first wins
@@ -1006,8 +1006,8 @@ export const callService = {
       const responderDoc = userMap.get(responderIdStr);
 
       // Extract user info
-      const userName = userDoc?.profile?.name?.trim() || userDoc?.phone || 'User';
-      const responderName = responderDoc?.profile?.name?.trim() || responderDoc?.phone || 'Responder';
+      const userName = userDoc?.profile?.name?.trim() || 'User';
+      const responderName = responderDoc?.profile?.name?.trim() || 'Responder';
 
       // Get display value based on who's viewing
       let displayValue: number;
@@ -1028,13 +1028,11 @@ export const callService = {
         user: {
           id: userIdStr,
           name: userName,
-          phone: userDoc?.phone || '',
           avatar: userDoc?.profile?.avatar || null,
         },
         responder: {
           id: responderIdStr,
           name: responderName,
-          phone: responderDoc?.phone || '',
           avatar: responderDoc?.profile?.avatar || null,
         },
         type: call.type,
@@ -1092,7 +1090,7 @@ export const callService = {
     return calls.map(call => ({
       ...call,
       _id: String(call._id),
-      callerName: (call.userId as any)?.profile?.name || (call.userId as any)?.phone || 'Unknown',
+      callerName: (call.userId as any)?.profile?.name || 'Someone',
     }));
   },
 

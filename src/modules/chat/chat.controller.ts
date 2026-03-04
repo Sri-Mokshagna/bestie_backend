@@ -53,7 +53,7 @@ export const chatController = {
 
     // PERFORMANCE FIX: Batch fetch all partners in ONE query
     const partners = await User.find({ _id: { $in: partnerIds } })
-      .select('profile phone isOnline')
+      .select('profile isOnline')
       .lean();
 
     // Create a map for quick lookup
@@ -86,7 +86,7 @@ export const chatController = {
           } : null,
         },
         partnerId: partnerId || '',
-        partnerName: partner?.profile?.name || partner?.phone || 'User',
+        partnerName: partner?.profile?.name || 'User',
         partnerAvatar: partner?.profile?.avatar || null,
         isOnline: partner?.isOnline || false,
       };
@@ -289,12 +289,12 @@ export const chatController = {
 
         if (recipientId) {
           const [recipient, sender] = await Promise.all([
-            User.findById(recipientId).select('fcmToken profile phone').lean(),
-            User.findById(req.user!.id).select('profile phone').lean(),
+            User.findById(recipientId).select('fcmToken profile').lean(),
+            User.findById(req.user!.id).select('profile').lean(),
           ]);
 
           if (recipient?.fcmToken) {
-            const senderName = sender?.profile?.name || sender?.phone || 'Someone';
+            const senderName = sender?.profile?.name || 'Someone';
             const messageContent = content.trim();
 
             await pushNotificationService.sendNotification(
