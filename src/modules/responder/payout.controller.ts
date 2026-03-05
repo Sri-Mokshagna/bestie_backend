@@ -242,6 +242,26 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
     throw new AppError(400, 'Payout is not in pending or processing state');
   }
 
+  // Early validation: check populate succeeded
+  const responderPopulated: any = payout.responderId;
+  if (!responderPopulated || !responderPopulated._id) {
+    logger.error({ payoutId }, '❌ Payout responderId populate failed - Responder document may have been deleted');
+    throw new AppError(400, 'Responder account associated with this payout no longer exists. Reject this payout instead.');
+  }
+  const userPopulated: any = responderPopulated.userId;
+  if (!userPopulated || !userPopulated._id) {
+    logger.error({ payoutId, responderId: responderPopulated._id }, '❌ Payout user populate failed - User document may have been deleted');
+    throw new AppError(400, 'User account associated with this payout no longer exists. Reject this payout instead.');
+  }
+
+  // Early validation: check Cashfree credentials before starting transaction
+  if (status === 'completed') {
+    if (!process.env.CASHFREE_PAYOUT_CLIENT_ID || !process.env.CASHFREE_PAYOUT_CLIENT_SECRET) {
+      logger.error({ payoutId }, '❌ CASHFREE_PAYOUT_CLIENT_ID or CASHFREE_PAYOUT_CLIENT_SECRET not set');
+      throw new AppError(500, 'Cashfree Payout credentials not configured on server. Set CASHFREE_PAYOUT_CLIENT_ID and CASHFREE_PAYOUT_CLIENT_SECRET environment variables.');
+    }
+  }
+
   // Retry logic for MongoDB write conflicts
   const MAX_RETRIES = 3;
   let lastError: any = null;
@@ -256,7 +276,7 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
         payout.status = PayoutStatus.PROCESSING;
         await payout.save({ session });
 
-        // Get responder details
+        // Get responder details (already validated above)
         const responder: any = payout.responderId;
         const user: any = responder.userId;
 

@@ -34,11 +34,16 @@ export const responderService = {
     const users = await User.find({ _id: { $in: userIds } }).lean();
     const userMap = new Map(users.map(u => [u._id.toString(), u]));
 
-    const respondersWithUsers = responders.map((responder) => {
-      const user = userMap.get(responder.userId.toString()) || null;
-      // Use serializer to properly format the response
-      return serializeResponder(responder, user);
-    });
+    const respondersWithUsers = responders
+      .filter((responder) => {
+        // Safety: skip orphaned Responder docs whose User was deleted (e.g. after voice rejection)
+        return userMap.has(responder.userId.toString());
+      })
+      .map((responder) => {
+        const user = userMap.get(responder.userId.toString())!;
+        // Use serializer to properly format the response
+        return serializeResponder(responder, user);
+      });
 
     // If user has a language preference, prioritize responders with the same language
     if (userLanguage) {
