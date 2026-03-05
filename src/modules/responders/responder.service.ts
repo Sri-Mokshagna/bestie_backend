@@ -1,5 +1,5 @@
 import { Responder, KycStatus } from '../../models/Responder';
-import { User } from '../../models/User';
+import { User, UserStatus } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
 import { notificationService } from '../../lib/notification';
 import { logger } from '../../lib/logger';
@@ -36,8 +36,11 @@ export const responderService = {
 
     const respondersWithUsers = responders
       .filter((responder) => {
-        // Safety: skip orphaned Responder docs whose User was deleted (e.g. after voice rejection)
-        return userMap.has(responder.userId.toString());
+        const user = userMap.get(responder.userId.toString());
+        // Skip orphaned Responder docs and blocked/suspended users
+        if (!user) return false;
+        if (user.status === 'blocked' || user.status === 'suspended') return false;
+        return true;
       })
       .map((responder) => {
         const user = userMap.get(responder.userId.toString())!;
@@ -384,7 +387,7 @@ export const responderService = {
       throw new AppError(404, 'Responder not found');
     }
 
-    // Get user details before deletion
+    // Get user details
     const user = await User.findById(responder.userId);
     if (!user) {
       throw new AppError(404, 'User not found');
@@ -397,11 +400,11 @@ export const responderService = {
       responderId,
       responderName,
       responderUserId,
-      action: 'about_to_reject_and_delete'
-    }, 'Admin rejecting and deleting responder account');
+      action: 'rejecting_responder'
+    }, 'Admin rejecting responder application');
 
     try {
-      // Send rejection notification BEFORE deleting
+      // Send rejection notification
       try {
         await notificationService.sendRejectionNotification(
           responderUserId.toString(),
@@ -410,53 +413,30 @@ export const responderService = {
         );
       } catch (error) {
         logger.error({ err: error }, 'Failed to send rejection notification');
-        // Continue with deletion even if notification fails
       }
 
-      // Import models for cleanup
-      const { Call } = await import('../../models/Call');
-      const { Chat, Message } = await import('../../models/Chat');
-      const { Transaction } = await import('../../models/Transaction');
-      const { Payout } = await import('../../models/Payout');
+      // Mark responder as rejected and set offline (keep in DB)
+      responder.kycStatus = KycStatus.REJECTED;
+      responder.isOnline = false;
+      await responder.save();
 
-      // Delete all related data
-      const cleanupResults = await Promise.allSettled([
-        Call.deleteMany({ responderId: responderUserId }),
-        Chat.find({ participants: responderUserId }).then(async (chats) => {
-          const chatIds = chats.map(c => c._id);
-          await Message.deleteMany({ chatId: { $in: chatIds } });
-          await Chat.deleteMany({ _id: { $in: chatIds } });
-        }),
-        Transaction.deleteMany({ responderId: responderUserId }),
-        Payout.deleteMany({ responderId: responderUserId }),
-        Responder.findByIdAndDelete(responderId),
-      ]);
-
-      // Log cleanup results
-      const failures = cleanupResults.filter(r => r.status === 'rejected');
-      if (failures.length > 0) {
-        logger.error({
-          responderId,
-          responderName,
-          failures: failures.map((f: any) => f.reason),
-        }, '⚠️ Some cleanup operations failed during responder deletion');
-      }
-
-      // Finally, delete the user account
-      await User.findByIdAndDelete(responderUserId);
+      // Suspend the user account so they cannot login
+      await User.findByIdAndUpdate(responderUserId, {
+        status: UserStatus.BLOCKED,
+        isOnline: false,
+      });
 
       logger.warn({
         responderId,
         responderName,
         responderUserId,
-        action: 'responder_rejected_and_deleted'
-      }, '✅ Admin rejected and deleted responder account');
+        action: 'responder_rejected'
+      }, '✅ Admin rejected responder - account blocked, record kept in DB');
 
-      // Return a placeholder object for response
       return {
         _id: responderId,
         userId: responderUserId,
-        kycStatus: 'deleted',
+        kycStatus: KycStatus.REJECTED,
         name: responderName
       };
     } catch (error) {
@@ -464,8 +444,8 @@ export const responderService = {
         responderId,
         responderName,
         error
-      }, '❌ Failed to delete responder');
-      throw new AppError(500, 'Failed to reject and delete responder');
+      }, '❌ Failed to reject responder');
+      throw new AppError(500, 'Failed to reject responder');
     }
   },
 };

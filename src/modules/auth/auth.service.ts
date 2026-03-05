@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import { admin } from '../../lib/firebase';
-import { User, UserRole } from '../../models/User';
+import { User, UserRole, UserStatus } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
 import { coinService } from '../../services/coinService';
 
@@ -111,6 +111,12 @@ export const authService = {
       if (user && user.role === UserRole.ADMIN) {
         console.warn('⚠️  Admin attempted OTP login:', phone);
         throw new AppError(403, 'Admins must login with email and password');
+      }
+
+      // Check if the user is blocked - show a clear message instead of OTP flow
+      if (user && (user.status === UserStatus.BLOCKED || user.status === UserStatus.SUSPENDED)) {
+        console.warn('🚫 Blocked user attempted login:', { phone, status: user.status });
+        throw new AppError(403, 'Your account has been blocked. Please contact support.');
       }
 
       if (!user) {
