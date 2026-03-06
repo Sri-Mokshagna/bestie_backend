@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { User, UserRole, UserStatus } from '../../models/User';
+import { User, UserRole } from '../../models/User';
 import { Responder, KycStatus } from '../../models/Responder';
 import { logger } from '../../lib/logger';
 
@@ -144,54 +144,32 @@ export const verifyVoiceRecording = async (req: Request, res: Response) => {
             }, 'Admin is about to reject and delete RESPONDER account');
 
             try {
-                // CRITICAL STEP 1: Delete the Responder document FIRST (must succeed)
-                // This immediately removes them from the responder list shown to users
-                const deletedResponder = await Responder.findOneAndDelete({ userId: responderId });
-                const responderDocId = deletedResponder?._id;
-
-                logger.info({
-                    responderId,
-                    responderDocId: responderDocId?.toString() || 'not_found',
-                    responderName,
-                }, deletedResponder
-                    ? '✅ Responder document deleted successfully'
-                    : '⚠️ No Responder document found for this user');
-
-                // CRITICAL STEP 2: Delete the User account
-                const deletedUser = await User.findByIdAndDelete(responderId);
-
-                if (!deletedUser) {
-                    logger.error({ responderId }, '❌ User not found or already deleted');
-                    return res.status(404).json({ error: 'Responder not found or already deleted' });
-                }
-
-                // STEP 3: Best-effort cleanup of related data (non-blocking)
                 // Import models for cleanup (lazy import to avoid circular dependencies)
                 const { Call } = await import('../../models/Call');
                 const { Chat, Message } = await import('../../models/Chat');
                 const { Transaction } = await import('../../models/Transaction');
                 const { Payout } = await import('../../models/Payout');
 
+                // Delete all related data for this responder
                 const cleanupResults = await Promise.allSettled([
-                    // Delete calls where responder was involved (Call.responderId = User._id)
+                    // Delete calls where responder was involved
                     Call.deleteMany({ responderId }),
 
                     // Delete chats involving this responder
                     Chat.find({ participants: responderId }).then(async (chats) => {
                         const chatIds = chats.map(c => c._id);
-                        if (chatIds.length > 0) {
-                            await Message.deleteMany({ chatId: { $in: chatIds } });
-                            await Chat.deleteMany({ _id: { $in: chatIds } });
-                        }
+                        await Message.deleteMany({ chatId: { $in: chatIds } });
+                        await Chat.deleteMany({ _id: { $in: chatIds } });
                     }),
 
                     // Delete transactions related to this responder
                     Transaction.deleteMany({ responderId }),
 
-                    // Delete payout requests (Payout.responderId = Responder._id)
-                    ...(responderDocId
-                        ? [Payout.deleteMany({ responderId: responderDocId })]
-                        : []),
+                    // Delete payout requests
+                    Payout.deleteMany({ responderId }),
+
+                    // Delete responder document
+                    Responder.findOneAndDelete({ userId: responderId }),
                 ]);
 
                 // Log cleanup results
@@ -200,13 +178,21 @@ export const verifyVoiceRecording = async (req: Request, res: Response) => {
                     logger.error({
                         responderId,
                         responderName,
-                        failures: failures.map(f => (f as PromiseRejectedResult).reason?.message || f),
+                        failures: failures.map(f => f.reason),
                     }, '⚠️ Some cleanup operations failed during responder deletion');
                 } else {
                     logger.info({
                         responderId,
                         responderName,
                     }, '✅ All related data cleaned up successfully');
+                }
+
+                // Finally, delete the user account
+                const deletedUser = await User.findByIdAndDelete(responderId);
+
+                if (!deletedUser) {
+                    logger.error({ responderId }, '❌ User not found or already deleted');
+                    return res.status(404).json({ error: 'Responder not found or already deleted' });
                 }
 
                 logger.warn({
@@ -234,9 +220,8 @@ export const verifyVoiceRecording = async (req: Request, res: Response) => {
                     stack: (cleanupError as Error).stack
                 }, '❌ Critical error during responder deletion cleanup');
 
-                // Last-resort: ensure both Responder and User are deleted
-                await Responder.findOneAndDelete({ userId: responderId }).catch(() => {});
-                await User.findByIdAndDelete(responderId).catch(() => {});
+                // Still try to delete the user even if cleanup partially failed
+                await User.findByIdAndDelete(responderId);
 
                 res.json({
                     success: true,
@@ -304,11 +289,9 @@ export const blockResponder = async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'User is not a responder' });
         }
 
-        // Update voice verification status
+        // Update voice verification status to blocked
         responder.profile = responder.profile || {};
         responder.profile.voiceVerificationStatus = blocked ? 'rejected' : 'approved';
-        // Block/unblock the user account so login is denied when blocked
-        responder.status = blocked ? UserStatus.BLOCKED : UserStatus.ACTIVE;
         await responder.save();
 
         // Update Responder model kycStatus

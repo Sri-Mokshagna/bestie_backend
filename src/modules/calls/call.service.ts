@@ -234,18 +234,20 @@ export const callService = {
     // 2. FCM notification (ALWAYS send, not just fallback)
     // FCM is reliable under concurrent load and works even if app killed
     if (responderUser.fcmToken) {
+      const callNotificationData = {
+        callId: String(call._id),
+        userId: userId, // ADD: For consistent tracking
+        responderId: String(responderUser._id), // ADD: Responder's ID
+        callerId: userId, // Keep for backwards compatibility
+        callerName,
+        callType: type === CallType.AUDIO ? 'audio' as const : 'video' as const,
+        zegoRoomId: call.zegoRoomId,
+      };
+      
       // Fire-and-forget - don't block response
       pushNotificationService.sendIncomingCallNotification(
         responderUser.fcmToken,
-        {
-          callId: String(call._id),
-          userId: userId, // ADD: For consistent tracking
-          responderId: String(responderUser._id), // ADD: Responder's ID
-          callerId: userId, // Keep for backwards compatibility
-          callerName,
-          callType: type === CallType.AUDIO ? 'audio' : 'video',
-          zegoRoomId: call.zegoRoomId,
-        }
+        callNotificationData
       ).then((success) => {
         if (success) {
           logger.info({
@@ -265,6 +267,20 @@ export const callService = {
           hasSocket: hasActiveSocket,
         }, '❌ FCM notification error');
       });
+
+      // BACKGROUND RELIABILITY FIX: Send data-only FCM message after 1 second
+      // Data-only messages ALWAYS trigger the Android background handler,
+      // ensuring call data is persisted even if the notification payload didn't wake the app
+      setTimeout(() => {
+        if (responderUser.fcmToken) {
+          pushNotificationService.sendDataOnlyCallNotification(
+            responderUser.fcmToken!,
+            callNotificationData
+          ).catch(err => {
+            logger.debug({ callId: String(call._id), error: err.message }, 'Data-only FCM failed (non-critical)');
+          });
+        }
+      }, 1000);
     } else {
       // No FCM token - socket is only option
       if (!hasActiveSocket) {
@@ -302,6 +318,16 @@ export const callService = {
     // DEFENSE: This is ADDITIVE - runs in background, doesn't block response
     // Only retries FCM, doesn't affect socket or existing call flow
     if (responderUser.fcmToken) {
+      const retryCallData = {
+        callId: String(call._id),
+        userId: userId,
+        responderId: String(responderUser._id),
+        callerId: userId,
+        callerName,
+        callType: type === CallType.AUDIO ? 'audio' as const : 'video' as const,
+        zegoRoomId: call.zegoRoomId,
+      };
+      
       // FIX: Store FCM retry timer so it can be cancelled if call ends before 5s
       const fcmRetryTimer = setTimeout(async () => {
         fcmRetryTimers.delete(String(call._id)); // Cleanup timer reference
@@ -310,18 +336,10 @@ export const callService = {
           if (currentCall && currentCall.status === CallStatus.RINGING) {
             logger.info({ callId: String(call._id) }, '🔄 Call still RINGING after 5s - retrying FCM notification');
 
-            // Retry FCM notification
+            // Retry with both notification + data-only for maximum reliability
             pushNotificationService.sendIncomingCallNotification(
               responderUser.fcmToken!,
-              {
-                callId: String(call._id),
-                userId: userId,
-                responderId: String(responderUser._id),
-                callerId: userId,
-                callerName,
-                callType: type === CallType.AUDIO ? 'audio' : 'video',
-                zegoRoomId: call.zegoRoomId,
-              }
+              retryCallData
             ).then(success => {
               if (success) {
                 logger.info({ callId: String(call._id) }, '✅ FCM retry successful');
@@ -329,6 +347,12 @@ export const callService = {
             }).catch(err => {
               logger.warn({ callId: String(call._id), error: err.message }, '⚠️ FCM retry failed');
             });
+
+            // Also send data-only for background handler
+            pushNotificationService.sendDataOnlyCallNotification(
+              responderUser.fcmToken!,
+              retryCallData
+            ).catch(() => {});
           } else {
             logger.info({ callId: String(call._id), status: currentCall?.status }, '⏭️ FCM retry skipped - call no longer RINGING');
           }
@@ -339,6 +363,22 @@ export const callService = {
       }, 5000); // 5 second delay
 
       fcmRetryTimers.set(String(call._id), fcmRetryTimer);
+      
+      // ADDITIONAL: Third retry at 10 seconds with data-only for maximum reliability
+      const fcmRetryTimer2 = setTimeout(async () => {
+        try {
+          const currentCall = await Call.findById(call._id);
+          if (currentCall && currentCall.status === CallStatus.RINGING && responderUser.fcmToken) {
+            logger.info({ callId: String(call._id) }, '🔄 Call still RINGING after 10s - sending final data-only FCM');
+            await pushNotificationService.sendDataOnlyCallNotification(
+              responderUser.fcmToken!,
+              retryCallData
+            );
+          }
+        } catch (_) {
+          // Non-critical
+        }
+      }, 10000);
     }
 
     return call;

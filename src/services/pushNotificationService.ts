@@ -53,7 +53,7 @@ export const pushNotificationService = {
       // Android specific configuration
       android: {
         priority: 'high' as const,
-        ttl: 30000, // 30 seconds - call times out anyway
+        ttl: 60000, // 60 seconds - give more time for delivery in production
         notification: {
           channelId: 'incoming_calls', // Must match Flutter channel
           priority: 'max' as const,
@@ -153,6 +153,67 @@ export const pushNotificationService = {
     }
 
     return false;
+  },
+
+  /**
+   * Send a data-only incoming call notification (for background reliability)
+   * Data-only messages ALWAYS trigger the background handler on Android,
+   * even when the app is in background/killed.
+   * This is sent as a follow-up to the main notification message.
+   */
+  async sendDataOnlyCallNotification(
+    fcmToken: string,
+    callData: {
+      callId: string;
+      userId: string;
+      responderId: string;
+      callerId: string;
+      callerName: string;
+      callType: 'audio' | 'video';
+      zegoRoomId: string;
+    }
+  ): Promise<boolean> {
+    if (!fcmToken) return false;
+
+    try {
+      const message = {
+        token: fcmToken,
+        // DATA-ONLY: No 'notification' field - this ensures background handler runs on Android
+        data: {
+          type: 'incoming_call',
+          callId: callData.callId,
+          userId: callData.userId,
+          responderId: callData.responderId,
+          callerId: callData.callerId,
+          callerName: callData.callerName,
+          callType: callData.callType,
+          zegoRoomId: callData.zegoRoomId,
+          dataOnly: 'true', // Flag to identify this as data-only
+          timestamp: Date.now().toString(),
+        },
+        android: {
+          priority: 'high' as const,
+          ttl: 60000,
+        },
+        apns: {
+          headers: {
+            'apns-priority': '10',
+          },
+          payload: {
+            aps: {
+              'content-available': 1, // Silent notification for background processing
+            },
+          },
+        },
+      };
+
+      await admin.messaging().send(message);
+      logger.info({ callId: callData.callId }, 'Data-only call notification sent');
+      return true;
+    } catch (error: any) {
+      logger.warn({ callId: callData.callId, error: error.message }, 'Data-only call notification failed');
+      return false;
+    }
   },
 
   /**

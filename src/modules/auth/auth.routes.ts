@@ -5,6 +5,9 @@ import { asyncHandler } from '../../lib/asyncHandler';
 
 const router = Router();
 
+// Check phone status before OTP (no auth required)
+router.post('/check-phone', asyncHandler(authController.checkPhone));
+
 // Admin login (email/password)
 router.post('/admin/login', asyncHandler(authController.adminLogin));
 

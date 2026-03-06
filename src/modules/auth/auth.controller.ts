@@ -5,6 +5,27 @@ import { AppError } from '../../middleware/errorHandler';
 import { User } from '../../models/User';
 
 export const authController = {
+  /**
+   * Check phone number status before sending OTP.
+   * No auth required.
+   */
+  async checkPhone(req: AuthRequest, res: Response) {
+    const { phone } = req.body;
+
+    if (!phone || typeof phone !== 'string') {
+      throw new AppError(400, 'Phone number is required');
+    }
+
+    // Normalise: accept both "9876543210" and "+919876543210"
+    let normalised = phone.trim();
+    if (!normalised.startsWith('+')) {
+      normalised = `+91${normalised}`;
+    }
+
+    const result = await authService.checkPhoneStatus(normalised);
+    res.json(result);
+  },
+
   // Admin login with email/password
   async adminLogin(req: AuthRequest, res: Response) {
     const { email, password } = req.body;

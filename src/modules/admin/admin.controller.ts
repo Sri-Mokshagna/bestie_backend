@@ -167,7 +167,7 @@ export const blockUser = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    user.status = block ? UserStatus.BLOCKED : UserStatus.ACTIVE;
+    user.status = block ? UserStatus.SUSPENDED : UserStatus.ACTIVE;
     await user.save();
 
     logger.info({ userId, block }, 'User block status updated by admin');

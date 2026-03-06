@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import { admin } from '../../lib/firebase';
-import { User, UserRole, UserStatus } from '../../models/User';
+import { User, UserRole } from '../../models/User';
+import { Responder } from '../../models/Responder';
 import { AppError } from '../../middleware/errorHandler';
 import { coinService } from '../../services/coinService';
 
@@ -113,10 +114,27 @@ export const authService = {
         throw new AppError(403, 'Admins must login with email and password');
       }
 
-      // Check if the user is blocked - show a clear message instead of OTP flow
-      if (user && (user.status === UserStatus.BLOCKED || user.status === UserStatus.SUSPENDED)) {
-        console.warn('🚫 Blocked user attempted login:', { phone, status: user.status });
-        throw new AppError(403, 'Your account has been blocked. Please contact support.');
+      // BLOCKED RESPONDER CHECK: Check if this responder is blocked BEFORE proceeding
+      // This prevents blocked responders from reaching the home screen
+      if (user && user.role === UserRole.RESPONDER) {
+        // Check voiceVerificationStatus on User profile
+        if (user.profile?.voiceVerificationStatus === 'rejected') {
+          console.warn('🚫 Blocked responder attempted login:', phone);
+          throw new AppError(403, 'Your account has been suspended. Please contact support for assistance.', 'ACCOUNT_BLOCKED');
+        }
+        
+        // Also check Responder document kycStatus
+        const responderDoc = await Responder.findOne({ userId: user._id }).lean();
+        if (responderDoc && responderDoc.kycStatus === 'rejected') {
+          console.warn('🚫 Blocked responder (rejected KYC) attempted login:', phone);
+          throw new AppError(403, 'Your account has been suspended. Please contact support for assistance.', 'ACCOUNT_BLOCKED');
+        }
+      }
+
+      // Also check if user account is suspended
+      if (user && user.status !== 'active') {
+        console.warn('🚫 Suspended user attempted login:', phone);
+        throw new AppError(403, 'Your account is not active. Please contact support for assistance.', 'ACCOUNT_SUSPENDED');
       }
 
       if (!user) {
@@ -370,6 +388,56 @@ export const authService = {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
+  },
+
+  /**
+   * Check phone number status BEFORE OTP is sent.
+   * Returns 'active' | 'blocked' | 'suspended' | 'new' (no account yet).
+   * No auth required.
+   */
+  async checkPhoneStatus(phone: string) {
+    const user = await User.findOne({ phone });
+
+    if (!user) {
+      // No account yet – OK to proceed with OTP
+      return { status: 'active' as const };
+    }
+
+    // Admin accounts should not use OTP
+    if (user.role === UserRole.ADMIN) {
+      return {
+        status: 'blocked' as const,
+        message: 'Admins must login with email and password.',
+      };
+    }
+
+    // Responder-specific block checks
+    if (user.role === UserRole.RESPONDER) {
+      if (user.profile?.voiceVerificationStatus === 'rejected') {
+        return {
+          status: 'blocked' as const,
+          message: 'Your account has been suspended. Please contact support for assistance.',
+        };
+      }
+
+      const responderDoc = await Responder.findOne({ userId: user._id }).lean();
+      if (responderDoc && responderDoc.kycStatus === 'rejected') {
+        return {
+          status: 'blocked' as const,
+          message: 'Your account has been suspended. Please contact support for assistance.',
+        };
+      }
+    }
+
+    // General user status check
+    if (user.status !== 'active') {
+      return {
+        status: 'suspended' as const,
+        message: 'Your account is not active. Please contact support for assistance.',
+      };
+    }
+
+    return { status: 'active' as const };
   },
 
   async updateUserProfile(userId: string, profileData: {
