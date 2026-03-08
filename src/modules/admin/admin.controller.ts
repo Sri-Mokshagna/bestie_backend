@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { User, UserStatus } from '../../models/User';
+import { Responder, KycStatus } from '../../models/Responder';
 import { Call } from '../../models/Call';
 import { Transaction } from '../../models/Transaction';
 import { Payout } from '../../models/Payout';
@@ -169,6 +170,20 @@ export const blockUser = async (req: Request, res: Response) => {
 
     user.status = block ? UserStatus.SUSPENDED : UserStatus.ACTIVE;
     await user.save();
+
+    // If this user is a responder, also update Responder model to ensure
+    // they are excluded from public listings
+    if (user.role === 'responder') {
+      const responderDoc = await Responder.findOne({ userId: userId });
+      if (responderDoc) {
+        responderDoc.kycStatus = block ? KycStatus.REJECTED : KycStatus.VERIFIED;
+        if (block) {
+          responderDoc.isOnline = false;
+        }
+        await responderDoc.save();
+        logger.info({ userId, block, kycStatus: responderDoc.kycStatus }, 'Responder kycStatus synced with block status');
+      }
+    }
 
     logger.info({ userId, block }, 'User block status updated by admin');
     res.json({

@@ -1,5 +1,5 @@
 import { Responder, KycStatus } from '../../models/Responder';
-import { User } from '../../models/User';
+import { User, UserStatus } from '../../models/User';
 import { AppError } from '../../middleware/errorHandler';
 import { notificationService } from '../../lib/notification';
 import { logger } from '../../lib/logger';
@@ -30,15 +30,18 @@ export const responderService = {
       .lean();
 
     // PERFORMANCE FIX: Batch fetch all users in ONE query instead of N queries
+    // CRITICAL: Only fetch ACTIVE users — exclude suspended/blocked users
     const userIds = responders.map(r => r.userId);
-    const users = await User.find({ _id: { $in: userIds } }).lean();
+    const users = await User.find({ _id: { $in: userIds }, status: UserStatus.ACTIVE }).lean();
     const userMap = new Map(users.map(u => [u._id.toString(), u]));
 
-    const respondersWithUsers = responders.map((responder) => {
-      const user = userMap.get(responder.userId.toString()) || null;
-      // Use serializer to properly format the response
-      return serializeResponder(responder, user);
-    });
+    const respondersWithUsers = responders
+      .filter((responder) => userMap.has(responder.userId.toString())) // Exclude blocked/suspended users
+      .map((responder) => {
+        const user = userMap.get(responder.userId.toString()) || null;
+        // Use serializer to properly format the response
+        return serializeResponder(responder, user);
+      });
 
     // If user has a language preference, prioritize responders with the same language
     if (userLanguage) {
@@ -67,6 +70,11 @@ export const responderService = {
 
     if (!user) {
       throw new AppError(404, 'User not found');
+    }
+
+    // Block suspended/blocked users from being visible
+    if (user.status === UserStatus.SUSPENDED) {
+      throw new AppError(404, 'Responder not found');
     }
 
     // Use serializer to properly format the response
