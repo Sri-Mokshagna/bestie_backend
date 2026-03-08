@@ -23,6 +23,7 @@ interface CashfreePayoutConfig {
   clientSecret: string;
   baseUrl: string;
   isProduction: boolean;
+  publicKey?: string; // RSA public key from Cashfree for Public Key 2FA
 }
 
 /**
@@ -130,6 +131,9 @@ class CashfreeService {
       const pgConfig = this.config || this.initializeConfig();
       const isProduction = pgConfig.isProduction;
 
+      // Read RSA public key from Cashfree for Public Key 2FA (alternative to IP whitelisting)
+      const publicKey = process.env.CASHFREE_PAYOUT_PUBLIC_KEY?.replace(/\\n/g, '\n');
+
       this.payoutConfig = {
         clientId,
         clientSecret,
@@ -139,6 +143,7 @@ class CashfreeService {
           ? 'https://api.cashfree.com/payout'
           : 'https://sandbox.cashfree.com/payout',
         isProduction,
+        publicKey,
       };
 
       logger.info({
@@ -146,6 +151,7 @@ class CashfreeService {
         baseUrl: this.payoutConfig.baseUrl,
         apiVersion: 'v2',
         clientIdPrefix: clientId.substring(0, 10) + '...',
+        auth2FA: publicKey ? 'Public Key' : 'IP Whitelist',
       }, '💸 Cashfree Payout API V2 initialized');
     }
     return this.payoutConfig;
@@ -207,17 +213,45 @@ class CashfreeService {
 
 
   /**
+   * Encrypt timestamp with Cashfree's RSA public key for Public Key 2FA
+   * Cashfree provides the public key; we encrypt the epoch timestamp with it
+   */
+  private encryptTimestampForPayout(timestamp: string, publicKey: string): string {
+    const encrypted = crypto.publicEncrypt(
+      {
+        key: publicKey,
+        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: 'sha256',
+      },
+      Buffer.from(timestamp)
+    );
+    return encrypted.toString('base64');
+  }
+
+  /**
    * Get headers for Payout V2 API calls
-   * V2 uses direct Client ID/Secret headers (no OAuth token needed)
+   * Includes Public Key 2FA encrypted timestamp when public key is configured
    */
   private getPayoutHeadersV2() {
     const config = this.initializePayoutConfig();
-    return {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-client-id': config.clientId,
       'x-client-secret': config.clientSecret,
       'x-api-version': '2024-01-01',
     };
+
+    // Add Public Key 2FA headers if Cashfree public key is configured
+    if (config.publicKey) {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const encryptedTimestamp = this.encryptTimestampForPayout(timestamp, config.publicKey);
+      headers['x-cf-timestamp'] = timestamp;
+      headers['x-cf-signature'] = encryptedTimestamp;
+
+      logger.debug({ timestamp }, 'Added Public Key 2FA encrypted timestamp to payout request');
+    }
+
+    return headers;
   }
 
   /**
