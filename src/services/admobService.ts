@@ -23,7 +23,7 @@ interface AdMobSSVPayload {
 }
 
 interface AdRewardConfig {
-  adRewardPoints: number; // Points earned per rewarded video ad (configurable by admin)
+  adCoinsPerVideo: number; // Coins earned directly per rewarded video ad
   rewardedVideoCoins: number; // Deprecated
   interstitialCoins: number;
   bannerClickCoins: number;
@@ -35,7 +35,7 @@ export class AdMobService {
 
   // Default reward configuration
   private rewardConfig: AdRewardConfig = {
-    adRewardPoints: 4, // 4 points per ad (configurable by admin)
+    adCoinsPerVideo: 6, // 6 coins directly per ad
     rewardedVideoCoins: 0, // No longer used
     interstitialCoins: 0,
     bannerClickCoins: 0,
@@ -44,8 +44,8 @@ export class AdMobService {
 
   private constructor() {
     // Load config from environment
-    this.rewardConfig.adRewardPoints = parseInt(
-      process.env.ADMOB_AD_REWARD_POINTS || '4'
+    this.rewardConfig.adCoinsPerVideo = parseInt(
+      process.env.ADMOB_AD_COINS_PER_VIDEO || '6'
     );
     this.rewardConfig.enabled = process.env.ADMOB_REWARDS_ENABLED !== 'false';
   }
@@ -118,13 +118,13 @@ export class AdMobService {
   }
 
   /**
-   * Credit reward points for rewarded video ad (NO COINS)
+   * Credit coins directly for rewarded video ad (6 coins per ad)
    */
   async creditRewardedVideo(
     userId: string,
     adUnitId: string,
     transactionId?: string
-  ): Promise<{ success: boolean; points: number; rewardPoints: number }> {
+  ): Promise<{ success: boolean; coins: number; coinBalance: number; points: number; rewardPoints: number }> {
     if (!this.rewardConfig.enabled) {
       throw new Error('Ad rewards are currently disabled');
     }
@@ -139,10 +139,10 @@ export class AdMobService {
         throw new Error('User not found');
       }
 
-      const points = this.rewardConfig.adRewardPoints; // Use configurable points per ad
+      const coins = this.rewardConfig.adCoinsPerVideo; // 6 coins per ad
 
-      // Credit ONLY reward points (NO COINS)
-      user.rewardPoints = (user.rewardPoints || 0) + points;
+      // Credit coins directly
+      user.coinBalance = (user.coinBalance || 0) + coins;
       await user.save({ session });
 
       // Create transaction record
@@ -151,13 +151,13 @@ export class AdMobService {
           {
             userId,
             type: TransactionType.AD_REWARD,
-            coins: 0, // No coins given directly from ads
+            coins,
             status: TransactionStatus.COMPLETED,
             meta: {
               adType: 'rewarded_video',
               adUnitId,
               adTransactionId: transactionId || `ad_${Date.now()}`,
-              rewardPoints: points,
+              coinsEarned: coins,
               timestamp: new Date(),
             },
           },
@@ -168,16 +168,18 @@ export class AdMobService {
       await session.commitTransaction();
 
       logger.info({
-        msg: 'Rewarded video points credited',
+        msg: 'Rewarded video coins credited',
         userId,
-        points,
-        newPoints: user.rewardPoints,
+        coins,
+        newBalance: user.coinBalance,
       });
 
       return {
         success: true,
-        points,
-        rewardPoints: user.rewardPoints,
+        coins,
+        coinBalance: user.coinBalance,
+        points: coins, // for backward compat with Flutter response parsing
+        rewardPoints: user.rewardPoints || 0,
       };
     } catch (error) {
       await session.abortTransaction();

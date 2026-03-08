@@ -32,7 +32,7 @@ export const getRewards = async (req: Request, res: Response) => {
     }
 };
 
-// Redeem reward - convert points to coins
+// Redeem reward - convert all points to coins freely (no tier restrictions)
 export const redeemReward = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.id;
@@ -42,19 +42,8 @@ export const redeemReward = async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Points to redeem and coins to receive are required' });
         }
 
-        // Validate redemption rates
-        const validRedemptions = [
-            { points: 100, coins: 50 },
-            { points: 200, coins: 100 },
-            { points: 500, coins: 250 },
-        ];
-
-        const isValid = validRedemptions.some(
-            r => r.points === pointsToRedeem && r.coins === coinsToReceive
-        );
-
-        if (!isValid) {
-            return res.status(400).json({ error: 'Invalid redemption rate' });
+        if (pointsToRedeem <= 0 || coinsToReceive <= 0) {
+            return res.status(400).json({ error: 'Points and coins must be positive values' });
         }
 
         const user = await User.findById(userId);
@@ -67,7 +56,7 @@ export const redeemReward = async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Insufficient reward points' });
         }
 
-        // Deduct points and add coins
+        // Deduct points and add coins — no tier restrictions
         user.rewardPoints = (user.rewardPoints || 0) - pointsToRedeem;
         user.coinBalance += coinsToReceive;
         await user.save();

@@ -16,10 +16,10 @@ export const getRewardConfig = asyncHandler(async (req: AuthRequest, res: Respon
  * Update AdMob reward configuration (Admin only)
  */
 export const updateRewardConfig = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { adRewardPoints, rewardedVideoCoins, interstitialCoins, bannerClickCoins, enabled } = req.body;
+  const { adCoinsPerVideo, rewardedVideoCoins, interstitialCoins, bannerClickCoins, enabled } = req.body;
 
   admobService.updateRewardConfig({
-    adRewardPoints,
+    adCoinsPerVideo,
     rewardedVideoCoins,
     interstitialCoins,
     bannerClickCoins,

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { User, UserRole } from '../../models/User';
+import { User, UserRole, UserStatus } from '../../models/User';
 import { Responder, KycStatus } from '../../models/Responder';
 import { logger } from '../../lib/logger';
 
@@ -289,9 +289,10 @@ export const blockResponder = async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'User is not a responder' });
         }
 
-        // Update voice verification status to blocked
+        // Update voice verification status and User.status (required for login denial + visibility filtering)
         responder.profile = responder.profile || {};
         responder.profile.voiceVerificationStatus = blocked ? 'rejected' : 'approved';
+        responder.status = blocked ? UserStatus.SUSPENDED : UserStatus.ACTIVE;
         await responder.save();
 
         // Update Responder model kycStatus
