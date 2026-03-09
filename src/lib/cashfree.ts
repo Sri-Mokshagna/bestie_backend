@@ -23,7 +23,7 @@ interface CashfreePayoutConfig {
   clientSecret: string;
   baseUrl: string;
   isProduction: boolean;
-  publicKey?: string; // RSA public key from Cashfree for Public Key 2FA
+  publicKey?: string; // Cashfree's RSA public key for Public Key 2FA encryption
 }
 
 /**
@@ -131,7 +131,7 @@ class CashfreeService {
       const pgConfig = this.config || this.initializeConfig();
       const isProduction = pgConfig.isProduction;
 
-      // Read RSA public key from Cashfree for Public Key 2FA (alternative to IP whitelisting)
+      // Read Cashfree's RSA public key for Public Key 2FA (alternative to IP whitelisting)
       const publicKey = process.env.CASHFREE_PAYOUT_PUBLIC_KEY?.replace(/\\n/g, '\n');
 
       this.payoutConfig = {
@@ -151,7 +151,7 @@ class CashfreeService {
         baseUrl: this.payoutConfig.baseUrl,
         apiVersion: 'v2',
         clientIdPrefix: clientId.substring(0, 10) + '...',
-        auth2FA: publicKey ? 'Public Key' : 'IP Whitelist',
+        auth2FA: publicKey ? 'Public Key (encryption)' : 'IP Whitelist',
       }, '💸 Cashfree Payout API V2 initialized');
     }
     return this.payoutConfig;
