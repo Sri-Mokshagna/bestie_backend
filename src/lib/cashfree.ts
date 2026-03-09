@@ -132,7 +132,16 @@ class CashfreeService {
       const isProduction = pgConfig.isProduction;
 
       // Read Cashfree's RSA public key for Public Key 2FA (alternative to IP whitelisting)
-      const publicKey = process.env.CASHFREE_PAYOUT_PUBLIC_KEY?.replace(/\\n/g, '\n');
+      let publicKey = process.env.CASHFREE_PAYOUT_PUBLIC_KEY;
+      if (publicKey) {
+        // Handle various newline escape formats from env var sources (Render, Docker, etc.)
+        publicKey = publicKey.replace(/\\n/g, '\n').replace(/\\r\\n/g, '\n');
+        // Validate it looks like a PEM key
+        if (!publicKey.includes('-----BEGIN')) {
+          logger.error('⚠️ CASHFREE_PAYOUT_PUBLIC_KEY does not look like a valid PEM key. Ensure full key with BEGIN/END headers is set.');
+          publicKey = undefined;
+        }
+      }
 
       this.payoutConfig = {
         clientId,
@@ -213,17 +222,16 @@ class CashfreeService {
 
 
   /**
-   * Encrypt timestamp with Cashfree's RSA public key for Public Key 2FA
-   * Cashfree provides the public key; we encrypt the epoch timestamp with it
+   * Encrypt data with Cashfree's RSA public key for Public Key 2FA
+   * Per Cashfree docs: encrypt "clientId.epochTimestamp" using RSA with the downloaded public key
    */
-  private encryptTimestampForPayout(timestamp: string, publicKey: string): string {
+  private encryptForPayout(data: string, publicKey: string): string {
     const encrypted = crypto.publicEncrypt(
       {
         key: publicKey,
         padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-        oaepHash: 'sha256',
       },
-      Buffer.from(timestamp)
+      Buffer.from(data)
     );
     return encrypted.toString('base64');
   }
@@ -242,13 +250,14 @@ class CashfreeService {
     };
 
     // Add Public Key 2FA headers if Cashfree public key is configured
+    // Per Cashfree docs: encrypt "clientId.epochTimestamp" and send as x-cf-signature
     if (config.publicKey) {
       const timestamp = Math.floor(Date.now() / 1000).toString();
-      const encryptedTimestamp = this.encryptTimestampForPayout(timestamp, config.publicKey);
-      headers['x-cf-timestamp'] = timestamp;
-      headers['x-cf-signature'] = encryptedTimestamp;
+      const dataToEncrypt = `${config.clientId}.${timestamp}`;
+      const encryptedSignature = this.encryptForPayout(dataToEncrypt, config.publicKey);
+      headers['x-cf-signature'] = encryptedSignature;
 
-      logger.debug({ timestamp }, 'Added Public Key 2FA encrypted timestamp to payout request');
+      logger.debug({ timestamp, clientIdPrefix: config.clientId.substring(0, 10) }, 'Added Public Key 2FA signature to payout request');
     }
 
     return headers;
