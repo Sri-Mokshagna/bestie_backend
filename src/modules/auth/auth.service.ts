@@ -122,7 +122,7 @@ export const authService = {
           console.warn('🚫 Blocked responder attempted login:', phone);
           throw new AppError(403, 'Your account has been suspended. Please contact support for assistance.', 'ACCOUNT_BLOCKED');
         }
-        
+
         // Also check Responder document kycStatus
         const responderDoc = await Responder.findOne({ userId: user._id }).lean();
         if (responderDoc && responderDoc.kycStatus === 'rejected') {
@@ -137,7 +137,10 @@ export const authService = {
         throw new AppError(403, 'Your account is not active. Please contact support for assistance.', 'ACCOUNT_SUSPENDED');
       }
 
+      let isNewUser = false;
+
       if (!user) {
+        isNewUser = true;
         console.log('👤 Creating new user:', { phone, firebaseUid });
         // Create new user with Firebase UID
         user = await User.create({
@@ -192,7 +195,11 @@ export const authService = {
         });
       }
 
-      // Return only user; client should send Firebase ID token on subsequent requests
+      // Check if user has a password set
+      const userWithPwd = await User.findById(user.id).select('+password');
+      const hasPassword = !!(userWithPwd && userWithPwd.password);
+
+      // Return user + isNewUser flag; client should send Firebase ID token on subsequent requests
       return {
         user: {
           id: user.id,
@@ -201,9 +208,11 @@ export const authService = {
           coinBalance: user.coinBalance,
           profile: user.profile,
           status: user.status,
+          hasPassword,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
         },
+        isNewUser,
       };
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -215,7 +224,7 @@ export const authService = {
   // JWT refresh removed; clients should refresh Firebase ID tokens via Firebase SDK
 
   async getUserById(userId: string) {
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('+password');
     if (!user) return null;
 
     return {
@@ -225,6 +234,7 @@ export const authService = {
       coinBalance: user.coinBalance,
       profile: user.profile,
       status: user.status,
+      hasPassword: !!user.password,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -392,21 +402,24 @@ export const authService = {
 
   /**
    * Check phone number status BEFORE OTP is sent.
-   * Returns 'active' | 'blocked' | 'suspended' | 'new' (no account yet).
+   * Returns status + isNew + hasPassword flags.
    * No auth required.
    */
   async checkPhoneStatus(phone: string) {
-    const user = await User.findOne({ phone });
+    // Need to select +password to check if it's set
+    const user = await User.findOne({ phone }).select('+password');
 
     if (!user) {
-      // No account yet – OK to proceed with OTP
-      return { status: 'active' as const };
+      // No account yet – new user, will need OTP
+      return { status: 'active' as const, isNew: true, hasPassword: false };
     }
 
     // Admin accounts should not use OTP
     if (user.role === UserRole.ADMIN) {
       return {
         status: 'blocked' as const,
+        isNew: false,
+        hasPassword: !!user.password,
         message: 'Admins must login with email and password.',
       };
     }
@@ -416,6 +429,8 @@ export const authService = {
       if (user.profile?.voiceVerificationStatus === 'rejected') {
         return {
           status: 'blocked' as const,
+          isNew: false,
+          hasPassword: !!user.password,
           message: 'Your account has been suspended. Please contact support for assistance.',
         };
       }
@@ -424,6 +439,8 @@ export const authService = {
       if (responderDoc && responderDoc.kycStatus === 'rejected') {
         return {
           status: 'blocked' as const,
+          isNew: false,
+          hasPassword: !!user.password,
           message: 'Your account has been suspended. Please contact support for assistance.',
         };
       }
@@ -433,11 +450,121 @@ export const authService = {
     if (user.status !== 'active') {
       return {
         status: 'suspended' as const,
+        isNew: false,
+        hasPassword: !!user.password,
         message: 'Your account is not active. Please contact support for assistance.',
       };
     }
 
-    return { status: 'active' as const };
+    return { status: 'active' as const, isNew: false, hasPassword: !!user.password };
+  },
+
+  /**
+   * Login with phone + password (for users/responders who have set a password).
+   * Returns Firebase custom token + user data.
+   */
+  async loginWithPassword(phone: string, password: string) {
+    try {
+      const user = await User.findOne({ phone }).select('+password');
+
+      if (!user) {
+        throw new AppError(401, 'Invalid phone number or password');
+      }
+
+      // Admins must use admin login
+      if (user.role === UserRole.ADMIN) {
+        throw new AppError(403, 'Admins must login with email and password via admin portal');
+      }
+
+      // Check if password is set
+      if (!user.password) {
+        throw new AppError(400, 'Password not set. Please login with OTP and set your password.');
+      }
+
+      // Verify password
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      if (!isValidPassword) {
+        throw new AppError(401, 'Invalid phone number or password');
+      }
+
+      // Check if user is active
+      if (user.status !== 'active') {
+        throw new AppError(403, 'Account is not active', 'ACCOUNT_SUSPENDED');
+      }
+
+      // BLOCKED RESPONDER CHECK
+      if (user.role === UserRole.RESPONDER) {
+        if (user.profile?.voiceVerificationStatus === 'rejected') {
+          throw new AppError(403, 'Your account has been suspended. Please contact support for assistance.', 'ACCOUNT_BLOCKED');
+        }
+        const responderDoc = await Responder.findOne({ userId: user._id }).lean();
+        if (responderDoc && responderDoc.kycStatus === 'rejected') {
+          throw new AppError(403, 'Your account has been suspended. Please contact support for assistance.', 'ACCOUNT_BLOCKED');
+        }
+      }
+
+      // Create Firebase custom token so the client establishes a Firebase session
+      let customToken;
+      try {
+        customToken = await admin.auth().createCustomToken(user.firebaseUid || user.id, {
+          role: user.role,
+        });
+      } catch (firebaseError: any) {
+        console.error('Firebase createCustomToken error:', firebaseError.message);
+        throw new AppError(500, 'Failed to generate authentication token');
+      }
+
+      return {
+        customToken,
+        user: {
+          id: user.id,
+          phone: user.phone,
+          role: user.role,
+          coinBalance: user.coinBalance,
+          profile: user.profile,
+          status: user.status,
+          hasPassword: true,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+        },
+      };
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      console.error('Unexpected error in loginWithPassword:', error);
+      throw new AppError(500, 'An unexpected error occurred during login');
+    }
+  },
+
+  /**
+   * Set or update user password. User must be authenticated (just verified OTP).
+   */
+  async setUserPassword(userId: string, password: string) {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new AppError(404, 'User not found');
+    }
+
+    if (password.length < 6) {
+      throw new AppError(400, 'Password must be at least 6 characters');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user.password = hashedPassword;
+    await user.save();
+
+    console.log('🔑 Password set for user:', { userId: user.id, phone: user.phone });
+
+    return {
+      id: user.id,
+      phone: user.phone,
+      role: user.role,
+      coinBalance: user.coinBalance,
+      profile: user.profile,
+      status: user.status,
+      hasPassword: true,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
   },
 
   async updateUserProfile(userId: string, profileData: {

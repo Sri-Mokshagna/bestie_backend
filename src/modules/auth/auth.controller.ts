@@ -72,6 +72,7 @@ export const authController = {
       // Ensure response is sent properly
       return res.status(200).json({
         user: result.user,
+        isNewUser: result.isNewUser,
       });
     } catch (error) {
       console.error('Verify OTP error:', error);
@@ -191,5 +192,68 @@ export const authController = {
     await User.findByIdAndUpdate(req.user.id, { fcmToken });
 
     res.json({ success: true, message: 'FCM token registered' });
+  },
+
+  /**
+   * Login with phone number + password (for users/responders with password set).
+   * No auth required.
+   */
+  async loginWithPassword(req: AuthRequest, res: Response) {
+    const { phone, password } = req.body;
+
+    if (!phone || typeof phone !== 'string') {
+      throw new AppError(400, 'Phone number is required');
+    }
+    if (!password || typeof password !== 'string') {
+      throw new AppError(400, 'Password is required');
+    }
+
+    // Normalise phone
+    let normalised = phone.trim();
+    if (!normalised.startsWith('+')) {
+      normalised = `+91${normalised}`;
+    }
+
+    const result = await authService.loginWithPassword(normalised, password);
+
+    // Set user online
+    if (result.user) {
+      await User.findByIdAndUpdate(result.user.id, { isOnline: true });
+
+      if (result.user.role === 'responder') {
+        const { Responder } = require('../../models/Responder');
+        await Responder.findOneAndUpdate(
+          { userId: result.user.id },
+          { isOnline: true, lastOnlineAt: new Date() },
+          { upsert: false }
+        );
+      }
+    }
+
+    res.json({
+      customToken: result.customToken,
+      user: result.user,
+    });
+  },
+
+  /**
+   * Set or update password. Requires authentication (user just verified OTP).
+   */
+  async setPassword(req: AuthRequest, res: Response) {
+    if (!req.user) {
+      throw new AppError(401, 'Not authenticated');
+    }
+
+    const { password } = req.body;
+    if (!password || typeof password !== 'string') {
+      throw new AppError(400, 'Password is required');
+    }
+
+    if (password.length < 6) {
+      throw new AppError(400, 'Password must be at least 6 characters');
+    }
+
+    const user = await authService.setUserPassword(req.user.id, password);
+    res.json({ user });
   },
 };

@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import { paymentService } from '../../services/paymentService';
 import { CoinPlan } from '../../models/CoinPlan';
+import { Payment, PaymentStatus } from '../../models/Payment';
 import { logger } from '../../lib/logger';
 import { AppError } from '../../middleware/errorHandler';
 import { coinService } from '../../services/coinService';
@@ -13,17 +15,36 @@ export class PaymentController {
       // Get coin config to calculate actual coins based on coinsToINRRate
       const config = await coinService.getConfig();
 
+      // Check if user has any previous successful payments
+      // This determines if first-time discounts should be shown
+      const userId = req.user?.id;
+      let hasExistingPayments = false;
+      if (userId) {
+        const previousSuccessfulPayments = await Payment.countDocuments({
+          userId: new Types.ObjectId(userId),
+          status: PaymentStatus.SUCCESS,
+        });
+        hasExistingPayments = previousSuccessfulPayments > 0;
+      }
+
       // Transform plans to show correct coins based on admin's coinsToINRRate setting
       // Example: If rate is 0.1 (₹0.1 per coin) and price is ₹100, user gets 1000 coins
       const transformedPlans = plans.map(plan => {
         const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
+
+        // CRITICAL FIX: Strip first-time discount for returning users
+        // so the Flutter UI shows the correct (full) price
+        const isFirstTimePlan = plan.tags.includes('first-time' as any);
+        const effectiveDiscount = (isFirstTimePlan && hasExistingPayments)
+          ? 0
+          : (plan.discount || 0);
 
         return {
           _id: plan._id,
           name: plan.name,
           priceINR: plan.priceINR,
           coins: calculatedCoins, // Calculated based on rate, not fixed value
-          discount: plan.discount,
+          discount: effectiveDiscount,
           tags: plan.tags,
           isActive: plan.isActive,
           maxUses: plan.maxUses,
@@ -39,6 +60,7 @@ export class PaymentController {
       logger.info({
         plansCount: plans.length,
         coinsToINRRate: config.coinsToINRRate,
+        hasExistingPayments,
         sample: transformedPlans[0]?._meta,
       }, 'Coin plans calculated with dynamic rate');
 

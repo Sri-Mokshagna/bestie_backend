@@ -14,6 +14,12 @@ router.post('/admin/login', asyncHandler(authController.adminLogin));
 // User/Responder login (OTP)
 router.post('/verify-otp', asyncHandler(authController.verifyOtp));
 
+// User/Responder login with password (no auth required)
+router.post('/login-password', asyncHandler(authController.loginWithPassword));
+
+// Set/reset password (auth required – user just verified OTP)
+router.post('/set-password', authenticate, asyncHandler(authController.setPassword));
+
 // Token refresh
 router.post('/refresh', asyncHandler(authController.refreshToken));
 
