@@ -10,7 +10,7 @@ const router = Router();
 // User wallet routes
 router.get('/balance', authenticate, asyncHandler(walletController.getBalance));
 router.get('/transactions', authenticate, asyncHandler(walletController.getTransactions));
-router.get('/coin-plans', asyncHandler(walletController.getCoinPlans));
+router.get('/coin-plans', authenticate, asyncHandler(walletController.getCoinPlans));
 router.post('/purchase', authenticate, asyncHandler(walletController.verifyPurchase));
 router.post('/ad-reward', authenticate, asyncHandler(walletController.verifyAdReward));
 

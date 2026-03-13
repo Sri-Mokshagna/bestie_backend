@@ -1,7 +1,10 @@
 import { Response } from 'express';
+import { Types } from 'mongoose';
 import { AuthRequest } from '../../middleware/auth';
 import { walletService } from './wallet.service';
 import { PaymentService } from '../../services/paymentService';
+import { Payment, PaymentStatus } from '../../models/Payment';
+import { coinService } from '../../services/coinService';
 import { AppError } from '../../middleware/errorHandler';
 import { logger } from '../../lib/logger';
 
@@ -31,7 +34,49 @@ export const walletController = {
 
   async getCoinPlans(req: AuthRequest, res: Response) {
     const plans = await walletService.getCoinPlans();
-    res.json({ plans });
+
+    // Get coin config to calculate actual coins based on coinsToINRRate
+    const config = await coinService.getConfig();
+
+    // Check if user has any previous successful payments
+    // This determines if first-time discounts should be shown
+    const userId = req.user?.id;
+    let hasExistingPayments = false;
+    if (userId) {
+      const previousSuccessfulPayments = await Payment.countDocuments({
+        userId: new Types.ObjectId(userId),
+        status: PaymentStatus.SUCCESS,
+      });
+      hasExistingPayments = previousSuccessfulPayments > 0;
+    }
+
+    // Transform plans: strip first-time discount for returning users
+    const transformedPlans = plans.map(plan => {
+      const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
+      const isFirstTimePlan = plan.tags.includes('first-time' as any);
+      const effectiveDiscount = (isFirstTimePlan && hasExistingPayments)
+        ? 0
+        : (plan.discount || 0);
+
+      return {
+        _id: plan._id,
+        name: plan.name,
+        priceINR: plan.priceINR,
+        coins: calculatedCoins,
+        discount: effectiveDiscount,
+        tags: plan.tags,
+        isActive: plan.isActive,
+        maxUses: plan.maxUses,
+      };
+    });
+
+    logger.info({
+      plansCount: plans.length,
+      hasExistingPayments,
+      userId,
+    }, 'Coin plans returned with discount check');
+
+    res.json({ plans: transformedPlans });
   },
 
   async verifyPurchase(req: AuthRequest, res: Response) {
