@@ -49,27 +49,28 @@ export class PaymentService {
       const customerEmail = user.profile?.email || `user_${user.phone.replace(/\+/g, '')}@bestie.app`;
 
       // Calculate actual amount after discount
-      // CRITICAL FIX: For 'first-time' tagged plans, only apply discount on the FIRST purchase
-      // After the first successful payment, charge the full price
+      // Per-plan discount: only apply discount on the FIRST purchase of each plan
+      // After the user buys a specific plan once, subsequent purchases are at full price
       let shouldApplyDiscount = plan.discount && plan.discount > 0;
 
-      if (shouldApplyDiscount && plan.tags.includes('first-time' as any)) {
-        // Check if user has any previous successful payments
-        const previousSuccessfulPayments = await Payment.countDocuments({
+      if (shouldApplyDiscount) {
+        // Check if user has previously purchased THIS specific plan
+        const previousPlanPurchases = await Payment.countDocuments({
           userId: new Types.ObjectId(userId),
+          planId: new Types.ObjectId(planId),
           status: PaymentStatus.SUCCESS,
         });
 
-        if (previousSuccessfulPayments > 0) {
-          // User has already made a purchase — no more first-time discount
+        if (previousPlanPurchases > 0) {
+          // User has already bought this plan before — no more discount
           shouldApplyDiscount = false;
           logger.info({
             userId,
             planId,
-            previousPayments: previousSuccessfulPayments,
-          }, '⚠️ First-time discount NOT applied — user has previous successful payments');
+            previousPlanPurchases,
+          }, '⚠️ Discount NOT applied — user already purchased this plan before');
         } else {
-          logger.info({ userId, planId }, '🎉 First-time discount applied — user\'s first purchase');
+          logger.info({ userId, planId }, '🎉 First-time plan discount applied — user has not purchased this plan before');
         }
       }
 

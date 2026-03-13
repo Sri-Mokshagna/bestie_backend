@@ -38,23 +38,24 @@ export const walletController = {
     // Get coin config to calculate actual coins based on coinsToINRRate
     const config = await coinService.getConfig();
 
-    // Check if user has any previous successful payments
-    // This determines if first-time discounts should be shown
+    // For each plan, check if user has already purchased THAT specific plan
+    // Discount applies only on the FIRST purchase of each plan
     const userId = req.user?.id;
-    let hasExistingPayments = false;
+    let purchasedPlanIds: Set<string> = new Set();
     if (userId) {
-      const previousSuccessfulPayments = await Payment.countDocuments({
+      const previousPayments = await Payment.find({
         userId: new Types.ObjectId(userId),
         status: PaymentStatus.SUCCESS,
-      });
-      hasExistingPayments = previousSuccessfulPayments > 0;
+      }).select('planId').lean();
+      purchasedPlanIds = new Set(previousPayments.map(p => p.planId.toString()));
     }
 
-    // Transform plans: strip first-time discount for returning users
+    // Transform plans: strip discount for plans the user has already purchased
     const transformedPlans = plans.map(plan => {
       const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
-      const isFirstTimePlan = plan.tags.includes('first-time' as any);
-      const effectiveDiscount = (isFirstTimePlan && hasExistingPayments)
+      const hasAlreadyPurchasedThisPlan = purchasedPlanIds.has(plan._id.toString());
+      // If user already bought this plan before, no discount; otherwise show original discount
+      const effectiveDiscount = hasAlreadyPurchasedThisPlan
         ? 0
         : (plan.discount || 0);
 
@@ -72,9 +73,9 @@ export const walletController = {
 
     logger.info({
       plansCount: plans.length,
-      hasExistingPayments,
+      purchasedPlanCount: purchasedPlanIds.size,
       userId,
-    }, 'Coin plans returned with discount check');
+    }, 'Coin plans returned with per-plan discount check');
 
     res.json({ plans: transformedPlans });
   },

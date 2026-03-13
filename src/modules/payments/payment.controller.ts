@@ -15,27 +15,25 @@ export class PaymentController {
       // Get coin config to calculate actual coins based on coinsToINRRate
       const config = await coinService.getConfig();
 
-      // Check if user has any previous successful payments
-      // This determines if first-time discounts should be shown
+      // Check which plans the user has already purchased
+      // Discount applies only on the FIRST purchase of each plan
       const userId = req.user?.id;
-      let hasExistingPayments = false;
+      let purchasedPlanIds: Set<string> = new Set();
       if (userId) {
-        const previousSuccessfulPayments = await Payment.countDocuments({
+        const previousPayments = await Payment.find({
           userId: new Types.ObjectId(userId),
           status: PaymentStatus.SUCCESS,
-        });
-        hasExistingPayments = previousSuccessfulPayments > 0;
+        }).select('planId').lean();
+        purchasedPlanIds = new Set(previousPayments.map(p => p.planId.toString()));
       }
 
-      // Transform plans to show correct coins based on admin's coinsToINRRate setting
-      // Example: If rate is 0.1 (₹0.1 per coin) and price is ₹100, user gets 1000 coins
+      // Transform plans to show correct coins and per-plan discount
       const transformedPlans = plans.map(plan => {
         const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
 
-        // CRITICAL FIX: Strip first-time discount for returning users
-        // so the Flutter UI shows the correct (full) price
-        const isFirstTimePlan = plan.tags.includes('first-time' as any);
-        const effectiveDiscount = (isFirstTimePlan && hasExistingPayments)
+        // Strip discount if user already purchased this specific plan
+        const hasAlreadyPurchasedThisPlan = purchasedPlanIds.has(plan._id.toString());
+        const effectiveDiscount = hasAlreadyPurchasedThisPlan
           ? 0
           : (plan.discount || 0);
 
@@ -43,12 +41,11 @@ export class PaymentController {
           _id: plan._id,
           name: plan.name,
           priceINR: plan.priceINR,
-          coins: calculatedCoins, // Calculated based on rate, not fixed value
+          coins: calculatedCoins,
           discount: effectiveDiscount,
           tags: plan.tags,
           isActive: plan.isActive,
           maxUses: plan.maxUses,
-          // Metadata for debugging
           _meta: {
             originalCoins: plan.coins,
             coinsToINRRate: config.coinsToINRRate,
@@ -60,9 +57,9 @@ export class PaymentController {
       logger.info({
         plansCount: plans.length,
         coinsToINRRate: config.coinsToINRRate,
-        hasExistingPayments,
+        purchasedPlanCount: purchasedPlanIds.size,
         sample: transformedPlans[0]?._meta,
-      }, 'Coin plans calculated with dynamic rate');
+      }, 'Coin plans calculated with per-plan discount');
 
       res.json({ plans: transformedPlans });
     } catch (error) {
