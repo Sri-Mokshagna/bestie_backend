@@ -38,24 +38,35 @@ export const walletController = {
     // Get coin config to calculate actual coins based on coinsToINRRate
     const config = await coinService.getConfig();
 
-    // For each plan, check if user has already purchased THAT specific plan
-    // Discount applies only on the FIRST purchase of each plan
+    // Count purchases per plan for this user
     const userId = req.user?.id;
-    let purchasedPlanIds: Set<string> = new Set();
+    const purchaseCountMap: Map<string, number> = new Map();
     if (userId) {
       const previousPayments = await Payment.find({
         userId: new Types.ObjectId(userId),
         status: PaymentStatus.SUCCESS,
       }).select('planId').lean();
-      purchasedPlanIds = new Set(previousPayments.map(p => p.planId.toString()));
+      for (const p of previousPayments) {
+        const pid = p.planId.toString();
+        purchaseCountMap.set(pid, (purchaseCountMap.get(pid) || 0) + 1);
+      }
     }
 
-    // Transform plans: strip discount for plans the user has already purchased
-    const transformedPlans = plans.map(plan => {
+    const MAX_PURCHASES_PER_PLAN = 3; // 1 discounted + 2 at full price
+
+    // Transform plans with purchase count, lock status, and discount
+    // Plans are sorted by priceINR ascending; the last plan is unlimited
+    const transformedPlans = plans.map((plan, index) => {
       const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
-      const hasAlreadyPurchasedThisPlan = purchasedPlanIds.has(plan._id.toString());
-      // If user already bought this plan before, no discount; otherwise show original discount
-      const effectiveDiscount = hasAlreadyPurchasedThisPlan
+      const planId = plan._id.toString();
+      const purchaseCount = purchaseCountMap.get(planId) || 0;
+      const isLastPlan = index === plans.length - 1;
+
+      // Last plan is never locked; other plans lock after MAX_PURCHASES_PER_PLAN
+      const isLocked = !isLastPlan && purchaseCount >= MAX_PURCHASES_PER_PLAN;
+
+      // Discount only on 1st purchase of this plan
+      const effectiveDiscount = purchaseCount > 0
         ? 0
         : (plan.discount || 0);
 
@@ -68,14 +79,17 @@ export const walletController = {
         tags: plan.tags,
         isActive: plan.isActive,
         maxUses: plan.maxUses,
+        purchaseCount,
+        isLocked,
+        maxPurchases: isLastPlan ? null : MAX_PURCHASES_PER_PLAN,
       };
     });
 
     logger.info({
       plansCount: plans.length,
-      purchasedPlanCount: purchasedPlanIds.size,
       userId,
-    }, 'Coin plans returned with per-plan discount check');
+      purchaseCounts: Object.fromEntries(purchaseCountMap),
+    }, 'Coin plans returned with per-plan limits');
 
     res.json({ plans: transformedPlans });
   },

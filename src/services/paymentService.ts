@@ -37,6 +37,26 @@ export class PaymentService {
         throw new AppError(404, 'Coin plan not found or inactive');
       }
 
+      // --- Per-plan purchase limit enforcement ---
+      const MAX_PURCHASES_PER_PLAN = 3;
+
+      // Count how many times user has purchased THIS specific plan
+      const previousPlanPurchases = await Payment.countDocuments({
+        userId: new Types.ObjectId(userId),
+        planId: new Types.ObjectId(planId),
+        status: PaymentStatus.SUCCESS,
+      });
+
+      // Check if this plan is the last (most expensive) active plan
+      const allActivePlans = await CoinPlan.find({ isActive: true }).sort({ priceINR: 1 }).select('_id').lean();
+      const isLastPlan = allActivePlans.length > 0 &&
+        allActivePlans[allActivePlans.length - 1]._id.toString() === planId;
+
+      // Reject if plan is locked (not last plan and purchased >= 3 times)
+      if (!isLastPlan && previousPlanPurchases >= MAX_PURCHASES_PER_PLAN) {
+        throw new AppError(400, 'This plan has reached its purchase limit. Please choose the next plan.');
+      }
+
       // Validate user has phone number (required for Cashfree)
       if (!user.phone) {
         throw new AppError(400, 'User phone number is required for payment');
@@ -48,30 +68,18 @@ export class PaymentService {
       // Generate email (use user's email or generate from phone)
       const customerEmail = user.profile?.email || `user_${user.phone.replace(/\+/g, '')}@bestie.app`;
 
-      // Calculate actual amount after discount
-      // Per-plan discount: only apply discount on the FIRST purchase of each plan
-      // After the user buys a specific plan once, subsequent purchases are at full price
+      // Per-plan discount: only on FIRST purchase of this plan
       let shouldApplyDiscount = plan.discount && plan.discount > 0;
 
-      if (shouldApplyDiscount) {
-        // Check if user has previously purchased THIS specific plan
-        const previousPlanPurchases = await Payment.countDocuments({
-          userId: new Types.ObjectId(userId),
-          planId: new Types.ObjectId(planId),
-          status: PaymentStatus.SUCCESS,
-        });
-
-        if (previousPlanPurchases > 0) {
-          // User has already bought this plan before — no more discount
-          shouldApplyDiscount = false;
-          logger.info({
-            userId,
-            planId,
-            previousPlanPurchases,
-          }, '⚠️ Discount NOT applied — user already purchased this plan before');
-        } else {
-          logger.info({ userId, planId }, '🎉 First-time plan discount applied — user has not purchased this plan before');
-        }
+      if (shouldApplyDiscount && previousPlanPurchases > 0) {
+        shouldApplyDiscount = false;
+        logger.info({
+          userId,
+          planId,
+          previousPlanPurchases,
+        }, '⚠️ Discount NOT applied — user already purchased this plan before');
+      } else if (shouldApplyDiscount) {
+        logger.info({ userId, planId }, '🎉 First-time plan discount applied');
       }
 
       const actualAmount = shouldApplyDiscount

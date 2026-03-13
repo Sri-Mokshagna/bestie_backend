@@ -15,27 +15,30 @@ export class PaymentController {
       // Get coin config to calculate actual coins based on coinsToINRRate
       const config = await coinService.getConfig();
 
-      // Check which plans the user has already purchased
-      // Discount applies only on the FIRST purchase of each plan
+      // Count purchases per plan for this user
       const userId = req.user?.id;
-      let purchasedPlanIds: Set<string> = new Set();
+      const purchaseCountMap: Map<string, number> = new Map();
       if (userId) {
         const previousPayments = await Payment.find({
           userId: new Types.ObjectId(userId),
           status: PaymentStatus.SUCCESS,
         }).select('planId').lean();
-        purchasedPlanIds = new Set(previousPayments.map(p => p.planId.toString()));
+        for (const p of previousPayments) {
+          const pid = p.planId.toString();
+          purchaseCountMap.set(pid, (purchaseCountMap.get(pid) || 0) + 1);
+        }
       }
 
-      // Transform plans to show correct coins and per-plan discount
-      const transformedPlans = plans.map(plan => {
-        const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
+      const MAX_PURCHASES_PER_PLAN = 3;
 
-        // Strip discount if user already purchased this specific plan
-        const hasAlreadyPurchasedThisPlan = purchasedPlanIds.has(plan._id.toString());
-        const effectiveDiscount = hasAlreadyPurchasedThisPlan
-          ? 0
-          : (plan.discount || 0);
+      // Transform plans with purchase count, lock status, and discount
+      const transformedPlans = plans.map((plan, index) => {
+        const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
+        const planId = plan._id.toString();
+        const purchaseCount = purchaseCountMap.get(planId) || 0;
+        const isLastPlan = index === plans.length - 1;
+        const isLocked = !isLastPlan && purchaseCount >= MAX_PURCHASES_PER_PLAN;
+        const effectiveDiscount = purchaseCount > 0 ? 0 : (plan.discount || 0);
 
         return {
           _id: plan._id,
@@ -46,20 +49,17 @@ export class PaymentController {
           tags: plan.tags,
           isActive: plan.isActive,
           maxUses: plan.maxUses,
-          _meta: {
-            originalCoins: plan.coins,
-            coinsToINRRate: config.coinsToINRRate,
-            calculation: `${plan.priceINR} / ${config.coinsToINRRate} = ${calculatedCoins}`,
-          },
+          purchaseCount,
+          isLocked,
+          maxPurchases: isLastPlan ? null : MAX_PURCHASES_PER_PLAN,
         };
       });
 
       logger.info({
         plansCount: plans.length,
-        coinsToINRRate: config.coinsToINRRate,
-        purchasedPlanCount: purchasedPlanIds.size,
-        sample: transformedPlans[0]?._meta,
-      }, 'Coin plans calculated with per-plan discount');
+        userId,
+        purchaseCounts: Object.fromEntries(purchaseCountMap),
+      }, 'Coin plans with per-plan limits');
 
       res.json({ plans: transformedPlans });
     } catch (error) {
