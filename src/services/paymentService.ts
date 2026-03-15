@@ -38,8 +38,6 @@ export class PaymentService {
       }
 
       // --- Per-plan purchase limit enforcement ---
-      const MAX_PURCHASES_PER_PLAN = 3;
-
       // Count how many times user has purchased THIS specific plan
       const previousPlanPurchases = await Payment.countDocuments({
         userId: new Types.ObjectId(userId),
@@ -52,8 +50,8 @@ export class PaymentService {
       const isLastPlan = allActivePlans.length > 0 &&
         allActivePlans[allActivePlans.length - 1]._id.toString() === planId;
 
-      // Reject if plan is locked (not last plan and purchased >= 3 times)
-      if (!isLastPlan && previousPlanPurchases >= MAX_PURCHASES_PER_PLAN) {
+      // Reject if plan is locked: not last plan, has maxUses set, and purchased >= maxUses
+      if (!isLastPlan && plan.maxUses && previousPlanPurchases >= plan.maxUses) {
         throw new AppError(400, 'This plan has reached its purchase limit. Please choose the next plan.');
       }
 

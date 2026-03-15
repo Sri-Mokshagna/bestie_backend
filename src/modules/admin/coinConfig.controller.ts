@@ -190,13 +190,29 @@ export const updateCoinPlan = asyncHandler(async (req: AuthRequest, res: Respons
   if (priceINR !== undefined) plan.priceINR = priceINR;
   if (coins !== undefined) plan.coins = coins;
   if (tags !== undefined) plan.tags = tags;
-  if (maxUses !== undefined) plan.maxUses = maxUses;
-  if (discount !== undefined) plan.discount = discount;
   if (isActive !== undefined) plan.isActive = isActive;
+
+  // Handle maxUses: null means "remove limit" (unlimited)
+  if (maxUses !== undefined) {
+    if (maxUses === null) {
+      plan.maxUses = undefined;
+    } else {
+      plan.maxUses = maxUses;
+    }
+  }
+
+  // Handle discount: null means "remove discount"
+  if (discount !== undefined) {
+    if (discount === null || discount === 0) {
+      plan.discount = undefined;
+    } else {
+      plan.discount = discount;
+    }
+  }
 
   await plan.save();
 
-  logger.info({ adminId: req.user?.id, planId: plan._id }, 'Coin plan updated');
+  logger.info({ adminId: req.user?.id, planId: plan._id, maxUses: plan.maxUses, discount: plan.discount }, 'Coin plan updated');
 
   res.json({ message: 'Coin plan updated', plan });
 });

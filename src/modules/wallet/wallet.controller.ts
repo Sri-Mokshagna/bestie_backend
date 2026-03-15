@@ -52,8 +52,6 @@ export const walletController = {
       }
     }
 
-    const MAX_PURCHASES_PER_PLAN = 3; // 1 discounted + 2 at full price
-
     // Transform plans with purchase count, lock status, and discount
     // Plans are sorted by priceINR ascending; the last plan is unlimited
     const transformedPlans = plans.map((plan, index) => {
@@ -61,9 +59,10 @@ export const walletController = {
       const planId = plan._id.toString();
       const purchaseCount = purchaseCountMap.get(planId) || 0;
       const isLastPlan = index === plans.length - 1;
+      const planMaxUses = plan.maxUses || null; // Admin-configured limit per plan
 
-      // Last plan is never locked; other plans lock after MAX_PURCHASES_PER_PLAN
-      const isLocked = !isLastPlan && purchaseCount >= MAX_PURCHASES_PER_PLAN;
+      // Last plan is never locked; other plans lock after their maxUses
+      const isLocked = !isLastPlan && planMaxUses != null && purchaseCount >= planMaxUses;
 
       // Discount only on 1st purchase of this plan
       const effectiveDiscount = purchaseCount > 0
@@ -81,7 +80,7 @@ export const walletController = {
         maxUses: plan.maxUses,
         purchaseCount,
         isLocked,
-        maxPurchases: isLastPlan ? null : MAX_PURCHASES_PER_PLAN,
+        maxPurchases: isLastPlan ? null : planMaxUses,
       };
     });
 

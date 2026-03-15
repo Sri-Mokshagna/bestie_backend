@@ -29,15 +29,14 @@ export class PaymentController {
         }
       }
 
-      const MAX_PURCHASES_PER_PLAN = 3;
-
       // Transform plans with purchase count, lock status, and discount
       const transformedPlans = plans.map((plan, index) => {
         const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
         const planId = plan._id.toString();
         const purchaseCount = purchaseCountMap.get(planId) || 0;
         const isLastPlan = index === plans.length - 1;
-        const isLocked = !isLastPlan && purchaseCount >= MAX_PURCHASES_PER_PLAN;
+        const planMaxUses = plan.maxUses || null;
+        const isLocked = !isLastPlan && planMaxUses != null && purchaseCount >= planMaxUses;
         const effectiveDiscount = purchaseCount > 0 ? 0 : (plan.discount || 0);
 
         return {
@@ -51,7 +50,7 @@ export class PaymentController {
           maxUses: plan.maxUses,
           purchaseCount,
           isLocked,
-          maxPurchases: isLastPlan ? null : MAX_PURCHASES_PER_PLAN,
+          maxPurchases: isLastPlan ? null : planMaxUses,
         };
       });
 
