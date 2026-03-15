@@ -21,6 +21,9 @@ export interface IMessage extends Document {
   };
   coinsCharged: number;
   readAt?: Date;
+  isDeleted: boolean;
+  deletedAt?: Date;
+  deletedBy?: Types.ObjectId;
   createdAt: Date;
 }
 
@@ -65,6 +68,19 @@ const messageSchema = new Schema<IMessage>(
     },
     readAt: {
       type: Date,
+      default: null,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
       default: null,
     },
   },

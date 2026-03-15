@@ -269,6 +269,7 @@ export function initializeChatSocket(io: SocketServer) {
           type: message.type || 'text',
           coinsCharged: message.coinsCharged,
           createdAt: message.createdAt,
+          isDeleted: false,
         };
 
         // PERFORMANCE: Emit to room IMMEDIATELY (don't wait for chat.save)
@@ -384,6 +385,57 @@ export function initializeChatSocket(io: SocketServer) {
         });
 
         if (callback) callback({ success: false, error: 'Failed to send message. Please try again.' });
+      }
+    });
+
+    // DELETE MESSAGE: Soft-delete a message (only sender can delete their own message)
+    socket.on('delete_message', async ({ messageId, chatId }) => {
+      try {
+        if (!socket.userId || !messageId || !chatId) {
+          logger.warn({ msg: 'delete_message: missing params', userId: socket.userId, messageId, chatId });
+          return;
+        }
+
+        // Find the message
+        const message = await Message.findById(messageId);
+        if (!message) {
+          logger.warn({ msg: 'delete_message: message not found', messageId });
+          return;
+        }
+
+        // Verify sender owns the message
+        if (message.senderId.toString() !== socket.userId) {
+          logger.warn({ msg: 'delete_message: not the sender', userId: socket.userId, senderId: message.senderId.toString() });
+          return;
+        }
+
+        // Verify message belongs to the chat
+        if (message.chatId.toString() !== chatId) {
+          logger.warn({ msg: 'delete_message: chatId mismatch', messageId, chatId });
+          return;
+        }
+
+        // Soft-delete the message
+        message.isDeleted = true;
+        message.deletedAt = new Date();
+        message.deletedBy = new Types.ObjectId(socket.userId);
+        message.content = 'This message was deleted';
+        await message.save();
+
+        // Broadcast deletion to everyone in the room
+        io.to(chatId).emit('message_deleted', {
+          messageId: message._id.toString(),
+          chatId: chatId,
+        });
+
+        logger.info({
+          msg: 'Message deleted',
+          messageId,
+          chatId,
+          deletedBy: socket.userId,
+        });
+      } catch (error) {
+        logger.error({ msg: 'delete_message error', error, messageId, chatId });
       }
     });
 

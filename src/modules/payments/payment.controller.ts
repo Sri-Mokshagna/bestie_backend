@@ -31,7 +31,6 @@ export class PaymentController {
 
       // Transform plans with purchase count, lock status, and discount
       const transformedPlans = plans.map((plan, index) => {
-        const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
         const planId = plan._id.toString();
         const purchaseCount = purchaseCountMap.get(planId) || 0;
         const isLastPlan = index === plans.length - 1;
@@ -43,7 +42,7 @@ export class PaymentController {
           _id: plan._id,
           name: plan.name,
           priceINR: plan.priceINR,
-          coins: calculatedCoins,
+          coins: plan.coins,
           discount: effectiveDiscount,
           tags: plan.tags,
           isActive: plan.isActive,

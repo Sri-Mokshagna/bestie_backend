@@ -55,7 +55,6 @@ export const walletController = {
     // Transform plans with purchase count, lock status, and discount
     // Plans are sorted by priceINR ascending; the last plan is unlimited
     const transformedPlans = plans.map((plan, index) => {
-      const calculatedCoins = Math.floor(plan.priceINR / config.coinsToINRRate);
       const planId = plan._id.toString();
       const purchaseCount = purchaseCountMap.get(planId) || 0;
       const isLastPlan = index === plans.length - 1;
@@ -73,7 +72,7 @@ export const walletController = {
         _id: plan._id,
         name: plan.name,
         priceINR: plan.priceINR,
-        coins: calculatedCoins,
+        coins: plan.coins,
         discount: effectiveDiscount,
         tags: plan.tags,
         isActive: plan.isActive,

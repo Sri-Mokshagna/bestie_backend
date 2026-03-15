@@ -78,11 +78,12 @@ export const chatController = {
             id: lastMessage._id.toString(),
             chatId: lastMessage.chatId.toString(),
             senderId: lastMessage.senderId.toString(),
-            content: lastMessage.content,
+            content: lastMessage.isDeleted ? 'This message was deleted' : lastMessage.content,
             type: lastMessage.type || 'text',
             metadata: lastMessage.metadata || null,
             createdAt: lastMessage.createdAt,
             readAt: lastMessage.readAt,
+            isDeleted: lastMessage.isDeleted || false,
           } : null,
         },
         partnerId: partnerId || '',
@@ -133,11 +134,12 @@ export const chatController = {
       id: msg._id.toString(),
       chatId: msg.chatId.toString(),
       senderId: msg.senderId.toString(),
-      content: msg.content,
+      content: msg.isDeleted ? 'This message was deleted' : msg.content,
       type: msg.type || 'text',
       metadata: msg.metadata || null,
       createdAt: msg.createdAt,
       readAt: msg.readAt,
+      isDeleted: msg.isDeleted || false,
     }));
 
     res.json({

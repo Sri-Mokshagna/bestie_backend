@@ -43,18 +43,28 @@ export const responderService = {
         return serializeResponder(responder, user);
       });
 
-    // If user has a language preference, prioritize responders with the same language
-    if (userLanguage) {
-      const sameLanguageResponders = respondersWithUsers.filter(
-        (item) => item.user?.profile?.language === userLanguage
-      );
-      const otherLanguageResponders = respondersWithUsers.filter(
-        (item) => item.user?.profile?.language !== userLanguage
-      );
-
-      return [...sameLanguageResponders, ...otherLanguageResponders];
+    // STRICT LANGUAGE FILTERING:
+    // - Users only see responders who speak their language OR English
+    // - English responders are visible to ALL users
+    // - If user has no language set, show all responders (backward compatible)
+    if (userLanguage && userLanguage !== 'en') {
+      // Non-English user: show responders who speak their language OR English
+      const filtered = respondersWithUsers.filter((item) => {
+        const responderLang = item.user?.profile?.language;
+        return responderLang === userLanguage || responderLang === 'en' || !responderLang;
+      });
+      // Sort: same-language first, then English
+      filtered.sort((a, b) => {
+        const aLang = a.user?.profile?.language;
+        const bLang = b.user?.profile?.language;
+        if (aLang === userLanguage && bLang !== userLanguage) return -1;
+        if (bLang === userLanguage && aLang !== userLanguage) return 1;
+        return 0;
+      });
+      return filtered;
     }
 
+    // English user or no language set: show all responders
     return respondersWithUsers;
   },
 
