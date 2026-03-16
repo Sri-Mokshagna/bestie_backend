@@ -123,7 +123,7 @@ export const authController = {
       throw new AppError(400, 'Language is required');
     }
 
-    const validLanguages = ['en', 'hi', 'te', 'ta', 'kn', 'ml', 'mr'];
+    const validLanguages = ['en', 'hi', 'te', 'ta', 'kn', 'ml', 'mr', 'bn', 'gu', 'pa'];
     if (!validLanguages.includes(language)) {
       throw new AppError(400, 'Invalid language code');
     }

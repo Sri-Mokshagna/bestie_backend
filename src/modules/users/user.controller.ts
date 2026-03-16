@@ -117,12 +117,65 @@ export const deleteAccount = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.id;
 
-        // Delete user data
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        console.log('🗑️ Deleting account for user:', { userId, phone: user.phone, role: user.role });
+
+        // Import models for cleanup
+        const { Responder } = require('../../models/Responder');
+        const { Call } = require('../../models/Call');
+        const { Chat, Message } = require('../../models/Chat');
+        const { Transaction } = require('../../models/Transaction');
+        const { Payout } = require('../../models/Payout');
+
+        // Clean up all related data (use allSettled so one failure doesn't block others)
+        const cleanupResults = await Promise.allSettled([
+            // Delete Responder doc if exists
+            Responder.findOneAndDelete({ userId }),
+            // Delete calls
+            Call.deleteMany({ $or: [{ userId }, { responderId: userId }] }),
+            // Delete chats and messages
+            Chat.find({ participants: userId }).then(async (chats: any[]) => {
+                const chatIds = chats.map((c: any) => c._id);
+                if (chatIds.length > 0) {
+                    await Message.deleteMany({ chatId: { $in: chatIds } });
+                    await Chat.deleteMany({ _id: { $in: chatIds } });
+                }
+            }),
+            // Delete transactions
+            Transaction.deleteMany({ $or: [{ userId }, { responderId: userId }] }),
+            // Delete payouts
+            Payout.deleteMany({ responderId: userId }),
+        ]);
+
+        // Log any cleanup failures (non-blocking)
+        const failures = cleanupResults.filter(r => r.status === 'rejected');
+        if (failures.length > 0) {
+            console.error('⚠️ Some cleanup operations failed during account deletion:', {
+                userId,
+                failures: failures.map((f: any) => f.reason?.message || f.reason),
+            });
+        }
+
+        // Delete the Firebase Auth user (so re-registration gets a clean slate)
+        if (user.firebaseUid) {
+            try {
+                const { admin } = require('../../lib/firebase');
+                await admin.auth().deleteUser(user.firebaseUid);
+                console.log('✅ Firebase user deleted:', user.firebaseUid);
+            } catch (firebaseError: any) {
+                // Don't fail the deletion if Firebase cleanup fails
+                console.error('⚠️ Failed to delete Firebase user (non-blocking):', firebaseError.message);
+            }
+        }
+
+        // Finally, delete the User document
         await User.findByIdAndDelete(userId);
 
-        // Optionally: Clean up related data
-        // await Call.deleteMany({ $or: [{ userId }, { responderId: userId }] });
-        // await Chat.deleteMany({ participants: userId });
+        console.log('✅ Account deleted successfully:', { userId, phone: user.phone });
 
         res.json({ message: 'Account deleted successfully' });
     } catch (error) {
