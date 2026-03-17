@@ -557,10 +557,16 @@ class CashfreeService {
         phone = phone.substring(2);
       }
 
+      // Sanitize name: strip special/unicode characters for payment gateway compatibility
+      const cleanName = (data.name || 'Beneficiary')
+        .replace(/[^a-zA-Z0-9\s.\-]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim() || 'Beneficiary';
+
       // V2 API field names (snake_case)
       const payload: any = {
         beneficiary_id: data.beneId,
-        beneficiary_name: data.name.substring(0, 100),
+        beneficiary_name: cleanName.substring(0, 100),
         beneficiary_email: data.email,
         beneficiary_phone: phone,
         address_line_1: data.address1 || 'India',
@@ -666,8 +672,14 @@ class CashfreeService {
 
       // V2 requires beneficiary_details object
       if (data.beneficiaryName || data.beneficiaryEmail || data.beneficiaryPhone) {
+        // Sanitize name: strip special/unicode characters for payment gateway compatibility
+        const cleanBeneName = (data.beneficiaryName || 'Responder')
+          .replace(/[^a-zA-Z0-9\s.\-]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim() || 'Responder';
+
         payload.beneficiary_details = {
-          beneficiary_name: data.beneficiaryName || 'Responder',
+          beneficiary_name: cleanBeneName,
           beneficiary_email: data.beneficiaryEmail || `${data.beneId}@bestie.app`,
           beneficiary_phone: data.beneficiaryPhone || '9999999999',
         };

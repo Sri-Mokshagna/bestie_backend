@@ -14,6 +14,21 @@ import { logger } from '../../lib/logger';
  * Handles payouts to responders via Cashfree Payout API
  */
 
+/**
+ * Sanitize a name for use with payment gateways.
+ * Strips emojis, special unicode characters, and stylish text.
+ * Keeps only basic Latin letters, digits, spaces, dots, and hyphens.
+ */
+function sanitizeName(name: string | undefined): string {
+  if (!name) return 'Responder';
+  // Remove all non-basic-Latin characters (emojis, special unicode, stylish fonts, etc.)
+  const cleaned = name.replace(/[^a-zA-Z0-9\s.\-]/g, '').trim();
+  // Collapse multiple spaces into one
+  const collapsed = cleaned.replace(/\s+/g, ' ');
+  // If everything was stripped, return fallback
+  return collapsed || 'Responder';
+}
+
 export const getEarnings = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) {
     throw new AppError(401, 'Not authenticated');
@@ -319,13 +334,13 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
           // Step 1: Create/Register beneficiary with Cashfree
           logger.info({
             beneId,
-            name: user.profile?.name || 'Responder',
+            name: sanitizeName(user.profile?.name),
             upiId: payout.upiId,
           }, '👤 Creating/verifying beneficiary');
 
           await cashfreeService.createBeneficiary({
             beneId,
-            name: user.profile?.name || 'Responder',
+            name: sanitizeName(user.profile?.name),
             email: user.email || `responder_${responder._id}@bestie.app`,
             phone: user.phone || '9999999999',
             vpa: payout.upiId,
@@ -349,7 +364,7 @@ export const processPayout = asyncHandler(async (req: AuthRequest, res: Response
             transferMode: 'upi',
             remarks: `Bestie payout - ${payout.coins} coins`,
             // V2 API requires beneficiary details in transfer request
-            beneficiaryName: user.profile?.name || 'Responder',
+            beneficiaryName: sanitizeName(user.profile?.name),
             beneficiaryEmail: user.email || `responder_${responder._id}@bestie.app`,
             beneficiaryPhone: user.phone || '9999999999',
             beneficiaryVpa: payout.upiId,
