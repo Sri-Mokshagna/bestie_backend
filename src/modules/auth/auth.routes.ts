@@ -1,18 +1,45 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { authController } from './auth.controller';
 import { authenticate } from '../../middleware/auth';
 import { asyncHandler } from '../../lib/asyncHandler';
 
 const router = Router();
 
-// Check phone status before OTP (no auth required)
-router.post('/check-phone', asyncHandler(authController.checkPhone));
+// OTP-specific rate limiter: max 5 OTP triggers per IP per 10 minutes
+// This is critical to prevent bot abuse driving up Firebase SMS costs
+const otpRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 5,
+  message: { error: 'Too many OTP requests. Please wait 10 minutes before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Rate limit by both IP and phone number to prevent IP rotation abuse
+    const phone = req.body?.phone ?? '';
+    const ip = req.ip ?? 'unknown';
+    return `${ip}:${phone}`;
+  },
+});
+
+// OTP verify limiter: max 10 verifications per IP per 10 minutes
+const otpVerifyLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 10,
+  message: { error: 'Too many verification attempts. Please wait 10 minutes before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Check phone status before OTP (strict rate limited)
+router.post('/check-phone', otpRateLimiter, asyncHandler(authController.checkPhone));
+
 
 // Admin login (email/password)
 router.post('/admin/login', asyncHandler(authController.adminLogin));
 
 // User/Responder login (OTP)
-router.post('/verify-otp', asyncHandler(authController.verifyOtp));
+router.post('/verify-otp', otpVerifyLimiter, asyncHandler(authController.verifyOtp));
 
 // User/Responder login with password (no auth required)
 router.post('/login-password', asyncHandler(authController.loginWithPassword));
