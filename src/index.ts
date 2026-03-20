@@ -148,13 +148,31 @@ app.use(compression({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Rate limiting
+// General API rate limiter — applied to all /api/* routes.
+// 300 req / 15 min per IP is generous enough for normal mobile app usage
+// (onboarding alone = ~8 calls; a user session = ~20-40 calls).
+// OTP-specific routes have their own tighter limiter in auth.routes.ts.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later',
+  max: 300, // Raised from 100 → 300 to accommodate onboarding + active sessions
+  message: { error: 'Too many requests. Please slow down and try again shortly.' },
   standardHeaders: true,
   legacyHeaders: false,
+  // Skip rate limiting for authenticated users on non-auth endpoints
+  // (profile updates, calls, messages — all normal in-app activity)
+  skip: (req) => {
+    const path = req.path;
+    // Always rate-limit unauthenticated auth endpoints (login/OTP flows)
+    const isAuthEndpoint =
+      path.includes('/auth/check-phone') ||
+      path.includes('/auth/verify-otp') ||
+      path.includes('/auth/login-password') ||
+      path.includes('/auth/admin/login');
+    // Authenticated requests (have Bearer token) doing profile/onboarding are fine
+    const hasToken = !!req.headers.authorization?.startsWith('Bearer ');
+    // Skip rate limit only for: has token AND not an auth endpoint
+    return hasToken && !isAuthEndpoint;
+  },
 });
 app.use('/api/', limiter);
 

@@ -358,10 +358,10 @@ export const authService = {
           isOnline: user.isOnline || false,
           kycStatus: 'pending', // New responders start as pending
           earnings: {
-            totalCoins: 0,
-            pendingCoins: 0,
-            lockedCoins: 0,
-            redeemedCoins: 0,
+            totalRupees: 0,
+            pendingRupees: 0,
+            lockedRupees: 0,
+            redeemedRupees: 0,
           },
           rating: 0,
           audioEnabled: user.audioEnabled ?? true,
