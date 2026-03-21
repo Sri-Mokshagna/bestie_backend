@@ -224,6 +224,9 @@ export const authService = {
   // JWT refresh removed; clients should refresh Firebase ID tokens via Firebase SDK
 
   async getUserById(userId: string) {
+    // CRITICAL: Must select('+password') here — the password field is excluded
+    // by default in Mongoose (select: false), so without this the hasPassword
+    // flag in the response is always false, breaking the GoRouter redirect logic.
     const user = await User.findById(userId).select('+password');
     if (!user) return null;
 
@@ -234,7 +237,7 @@ export const authService = {
       coinBalance: user.coinBalance,
       profile: user.profile,
       status: user.status,
-      hasPassword: !!user.password,
+      hasPassword: !!user.password,  // ← was missing, causing perpetual redirect to /auth/set-password
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -342,21 +345,18 @@ export const authService = {
 
     await user.save();
 
-    // CRITICAL FIX: Create Responder document when role changes to responder
+    // Create Responder document when role changes to responder
     if (role === UserRole.RESPONDER && previousRole !== UserRole.RESPONDER) {
       console.log('🎯 User becoming responder - creating Responder document');
 
-      const { Responder } = require('../../models/Responder');
-
-      // Check if Responder document already exists
+      // Responder is already imported at top of file — no dynamic require needed
       let responderDoc = await Responder.findOne({ userId: user.id });
 
       if (!responderDoc) {
-        // Create new Responder document with default settings
         responderDoc = await Responder.create({
           userId: user.id,
           isOnline: user.isOnline || false,
-          kycStatus: 'pending', // New responders start as pending
+          kycStatus: 'pending',
           earnings: {
             totalRupees: 0,
             pendingRupees: 0,
@@ -395,6 +395,7 @@ export const authService = {
       coinBalance: user.coinBalance,
       profile: user.profile,
       status: user.status,
+      hasPassword: !!(await User.findById(user.id).select('+password'))?.password,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
