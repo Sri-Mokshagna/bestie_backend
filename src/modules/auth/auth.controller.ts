@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middleware/auth';
 import { authService } from './auth.service';
 import { AppError } from '../../middleware/errorHandler';
 import { User } from '../../models/User';
+import { Responder } from '../../models/Responder';
 
 export const authController = {
   /**
@@ -58,13 +59,11 @@ export const authController = {
         await User.findByIdAndUpdate(result.user.id, { isOnline: true });
 
         // CRITICAL FIX: Also update Responder model if user is a responder
-        // This ensures responder appears online in admin panel immediately after first login
         if (result.user.role === 'responder') {
-          const { Responder } = require('../../models/Responder');
           await Responder.findOneAndUpdate(
             { userId: result.user.id },
             { isOnline: true, lastOnlineAt: new Date() },
-            { upsert: false } // Don't create if doesn't exist
+            { upsert: false }
           );
         }
       }
@@ -221,7 +220,6 @@ export const authController = {
       await User.findByIdAndUpdate(result.user.id, { isOnline: true });
 
       if (result.user.role === 'responder') {
-        const { Responder } = require('../../models/Responder');
         await Responder.findOneAndUpdate(
           { userId: result.user.id },
           { isOnline: true, lastOnlineAt: new Date() },

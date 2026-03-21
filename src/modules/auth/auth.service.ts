@@ -249,7 +249,10 @@ export const authService = {
       gender,
     });
 
-    const user = await User.findById(userId);
+    // MUST select('+password') — password is select:false in schema.
+    // All user-returning endpoints need hasPassword, otherwise Flutter defaults
+    // hasPassword=false and GoRouter loops to /auth/set-password.
+    const user = await User.findById(userId).select('+password');
     if (!user) {
       console.error('❌ User not found for gender update:', userId);
       throw new AppError(404, 'User not found');
@@ -280,13 +283,15 @@ export const authService = {
       coinBalance: user.coinBalance,
       profile: user.profile,
       status: user.status,
+      hasPassword: !!user.password,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
   },
 
   async updateUserLanguage(userId: string, language: string) {
-    const user = await User.findById(userId);
+    // MUST select('+password') — see updateUserGender comment above.
+    const user = await User.findById(userId).select('+password');
     if (!user) {
       throw new AppError(404, 'User not found');
     }
@@ -301,6 +306,7 @@ export const authService = {
       coinBalance: user.coinBalance,
       profile: user.profile,
       status: user.status,
+      hasPassword: !!user.password,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -574,7 +580,8 @@ export const authService = {
     bio?: string;
     avatarBase64?: string;
   }) {
-    const user = await User.findById(userId);
+    // MUST select('+password') — see updateUserGender comment above.
+    const user = await User.findById(userId).select('+password');
     if (!user) {
       throw new AppError(404, 'User not found');
     }
@@ -606,6 +613,7 @@ export const authService = {
       coinBalance: user.coinBalance,
       profile: user.profile,
       status: user.status,
+      hasPassword: !!user.password,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
