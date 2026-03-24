@@ -4,8 +4,121 @@ import { User, UserRole } from '../../models/User';
 import { Responder } from '../../models/Responder';
 import { AppError } from '../../middleware/errorHandler';
 import { coinService } from '../../services/coinService';
+import { msg91Service } from '../../services/msg91Service';
 
 export const authService = {
+  /**
+   * Send OTP to a phone number via MSG91.
+   * Called by POST /api/auth/send-otp
+   */
+  async sendOtp(phone: string): Promise<void> {
+    console.log(`📱 Sending MSG91 OTP to: ${phone}`);
+    await msg91Service.sendOtp(phone);
+  },
+
+  /**
+   * Verify OTP entered by user (via MSG91) and return user data + Firebase custom token.
+   * The custom token lets the client sign into Firebase and obtain an idToken
+   * for all subsequent authenticated API calls (Bearer token).
+   * Called by POST /api/auth/verify-otp
+   */
+  async verifyMsg91Otp(phone: string, otp: string) {
+    console.log('🔐 Verifying MSG91 OTP for:', phone);
+
+    // 1. Verify OTP with MSG91
+    const isValid = await msg91Service.verifyOtp(phone, otp);
+    if (!isValid) {
+      throw new AppError(401, 'Invalid or expired OTP. Please try again.');
+    }
+    console.log('✅ MSG91 OTP verified successfully');
+
+    // 2. Find or create user by phone
+    let user = await User.findOne({ phone });
+
+    // Enforce: Admins must use email/password (no OTP)
+    if (user && user.role === UserRole.ADMIN) {
+      console.warn('⚠️  Admin attempted OTP login:', phone);
+      throw new AppError(403, 'Admins must login with email and password');
+    }
+
+    // BLOCKED RESPONDER CHECK
+    if (user && user.role === UserRole.RESPONDER) {
+      if (user.profile?.voiceVerificationStatus === 'rejected') {
+        console.warn('🚫 Blocked responder attempted login:', phone);
+        throw new AppError(403, 'Your account has been suspended. Please contact support for assistance.', 'ACCOUNT_BLOCKED');
+      }
+      const responderDoc = await Responder.findOne({ userId: user._id }).lean();
+      if (responderDoc && responderDoc.kycStatus === 'rejected') {
+        console.warn('🚫 Blocked responder (rejected KYC) attempted login:', phone);
+        throw new AppError(403, 'Your account has been suspended. Please contact support for assistance.', 'ACCOUNT_BLOCKED');
+      }
+    }
+
+    // Suspended user check
+    if (user && user.status !== 'active') {
+      console.warn('🚫 Suspended user attempted login:', phone);
+      throw new AppError(403, 'Your account is not active. Please contact support for assistance.', 'ACCOUNT_SUSPENDED');
+    }
+
+    let isNewUser = false;
+
+    if (!user) {
+      isNewUser = true;
+      console.log('👤 Creating new user:', { phone });
+      user = await User.create({
+        phone,
+        role: UserRole.USER,
+        coinBalance: 0,
+        profile: {},
+      });
+      console.log('✅ New user created:', { id: user.id, phone: user.phone });
+
+      // Initialize default coins
+      try {
+        await coinService.initializeUserCoins(user.id);
+        user = await User.findById(user.id) as any;
+        console.log('💰 Initial coins credited:', user.coinBalance);
+      } catch (coinError) {
+        console.error('⚠️  Failed to initialize coins (non-fatal):', coinError);
+      }
+    } else {
+      console.log('✅ Existing user found:', { id: user.id, phone: user.phone });
+    }
+
+    // 3. Issue Firebase custom token so client can establish a Firebase session
+    //    and get an idToken for all subsequent API calls — this keeps the
+    //    Firebase token flow 100% intact.
+    const uid = user.firebaseUid ?? user.id;
+    let customToken: string;
+    try {
+      customToken = await admin.auth().createCustomToken(uid, { role: user.role });
+      console.log('🔑 Firebase custom token created for uid:', uid);
+    } catch (firebaseError: any) {
+      console.error('Firebase createCustomToken error:', firebaseError.message);
+      throw new AppError(500, 'Failed to generate authentication token');
+    }
+
+    // 4. Check if user has a password set
+    const userWithPwd = await User.findById(user.id).select('+password');
+    const hasPassword = !!(userWithPwd && userWithPwd.password);
+
+    return {
+      customToken,
+      user: {
+        id: user.id,
+        phone: user.phone,
+        role: user.role,
+        coinBalance: user.coinBalance,
+        profile: user.profile,
+        status: user.status,
+        hasPassword,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
+      isNewUser,
+    };
+  },
+
   // Admin login with email/password
   async adminLogin(email: string, password: string) {
     try {

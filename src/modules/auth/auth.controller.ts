@@ -10,6 +10,29 @@ export const authController = {
    * Check phone number status before sending OTP.
    * No auth required.
    */
+  /**
+   * Send OTP to phone via MSG91. No auth required.
+   */
+  async sendOtp(req: AuthRequest, res: Response) {
+    const { phone } = req.body;
+
+    if (!phone || typeof phone !== 'string') {
+      throw new AppError(400, 'Phone number is required');
+    }
+
+    let normalised = phone.trim();
+    if (!normalised.startsWith('+')) {
+      normalised = `+91${normalised}`;
+    }
+
+    await authService.sendOtp(normalised);
+    res.json({ success: true, message: 'OTP sent successfully' });
+  },
+
+  /**
+   * Check phone number status before sending OTP.
+   * No auth required.
+   */
   async checkPhone(req: AuthRequest, res: Response) {
     const { phone } = req.body;
 
@@ -26,6 +49,7 @@ export const authController = {
     const result = await authService.checkPhoneStatus(normalised);
     res.json(result);
   },
+
 
   // Admin login with email/password
   async adminLogin(req: AuthRequest, res: Response) {
@@ -45,20 +69,28 @@ export const authController = {
   },
   async verifyOtp(req: AuthRequest, res: Response) {
     try {
-      const { idToken } = req.body;
+      const { phone, otp } = req.body;
 
-      if (!idToken) {
-        throw new AppError(400, 'ID token is required');
+      if (!phone || typeof phone !== 'string') {
+        throw new AppError(400, 'Phone number is required');
+      }
+      if (!otp || typeof otp !== 'string') {
+        throw new AppError(400, 'OTP is required');
       }
 
-      const result = await authService.verifyFirebaseToken(idToken);
+      // Normalise phone
+      let normalised = phone.trim();
+      if (!normalised.startsWith('+')) {
+        normalised = `+91${normalised}`;
+      }
 
-      // Set user online after successful login
+      // Verify OTP with MSG91 → creates/finds user → returns Firebase custom token
+      const result = await authService.verifyMsg91Otp(normalised, otp.trim());
+
+      // Set user online after successful OTP verification
       if (result.user) {
-        // Update User model
         await User.findByIdAndUpdate(result.user.id, { isOnline: true });
 
-        // CRITICAL FIX: Also update Responder model if user is a responder
         if (result.user.role === 'responder') {
           await Responder.findOneAndUpdate(
             { userId: result.user.id },
@@ -68,8 +100,9 @@ export const authController = {
         }
       }
 
-      // Ensure response is sent properly
+      // Return customToken so client can sign into Firebase and get idToken
       return res.status(200).json({
+        customToken: result.customToken,
         user: result.user,
         isNewUser: result.isNewUser,
       });
@@ -78,6 +111,7 @@ export const authController = {
       throw error;
     }
   },
+
 
   async refreshToken(_req: AuthRequest, res: Response) {
     // JWT flow disabled; clients should refresh Firebase ID tokens via Firebase SDK
