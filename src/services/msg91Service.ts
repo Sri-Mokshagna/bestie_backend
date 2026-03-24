@@ -1,39 +1,42 @@
 import axios from 'axios';
 
+// MSG91 credentials — set these as environment variables on Render
 const AUTH_KEY = process.env.MSG91_AUTH_KEY ?? '';
-// Template ID is optional — if not set, MSG91 uses its default OTP template
+// Template ID from MSG91 dashboard (OTP → your template → Template ID column)
+// Your template ID: 69c207670616db272c0a1770
 const TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID ?? '';
-const SENDER_ID = process.env.MSG91_SENDER_ID ?? 'BESTIE';
 const OTP_EXPIRY_MINUTES = 10;
 const OTP_LENGTH = 6;
 
 /**
- * MSG91 OTP Service
- * Handles OTP send and verify via MSG91 API v5.
- * Required env var: MSG91_AUTH_KEY
- * Optional env vars: MSG91_TEMPLATE_ID (default template used if absent), MSG91_SENDER_ID
+ * MSG91 OTP Service — Direct API v5
+ * Required env vars:
+ *   MSG91_AUTH_KEY     = 502821TSU3X1LsvCA69c20959P1
+ *   MSG91_TEMPLATE_ID  = 69c207670616db272c0a1770
+ *
+ * Template uses ##var1## as the OTP placeholder (MSG91 auto-fills it).
  */
 export const msg91Service = {
   /**
-   * Send OTP to a phone number via MSG91.
+   * Send OTP via MSG91.
    * @param phone E.164 format, e.g. +919876543210
    */
   async sendOtp(phone: string): Promise<void> {
     if (!AUTH_KEY) throw new Error('MSG91_AUTH_KEY environment variable is not set');
-    // MSG91 expects mobile without leading '+', e.g. 919876543210
+
+    // MSG91 API expects mobile without '+', e.g. 919876543210
     const mobile = phone.replace(/^\+/, '');
 
     console.log(`📱 [MSG91] Sending OTP to: ${mobile}`);
 
     const res = await axios.post(
       'https://control.msg91.com/api/v5/otp',
-      null, // no request body for this endpoint
+      null,
       {
         params: {
           authkey: AUTH_KEY,
           ...(TEMPLATE_ID ? { template_id: TEMPLATE_ID } : {}),
           mobile,
-          sender: SENDER_ID,
           otp_expiry: OTP_EXPIRY_MINUTES,
           otp_length: OTP_LENGTH,
         },
@@ -41,7 +44,7 @@ export const msg91Service = {
       }
     );
 
-    console.log(`📱 [MSG91] Send OTP response:`, res.data);
+    console.log(`📱 [MSG91] Send OTP response:`, JSON.stringify(res.data));
 
     if (res.data?.type !== 'success') {
       throw new Error(`MSG91 sendOtp failed: ${JSON.stringify(res.data)}`);
@@ -51,32 +54,31 @@ export const msg91Service = {
   },
 
   /**
-   * Verify OTP entered by user against MSG91.
+   * Verify OTP via MSG91.
+   * Uses POST with authkey in header — correct format for MSG91 API v5.
    * @param phone E.164 format, e.g. +919876543210
    * @param otp   6-digit OTP entered by user
-   * @returns true if OTP is valid, false otherwise
    */
   async verifyOtp(phone: string, otp: string): Promise<boolean> {
     if (!AUTH_KEY) throw new Error('MSG91_AUTH_KEY environment variable is not set');
 
     const mobile = phone.replace(/^\+/, '');
 
-    console.log(`🔐 [MSG91] Verifying OTP — mobile: ${mobile}, otp: ${otp}, authkey length: ${AUTH_KEY.length}`);
+    console.log(`🔐 [MSG91] Verifying OTP — mobile: ${mobile}, authkey_length: ${AUTH_KEY.length}`);
 
-    const res = await axios.get('https://control.msg91.com/api/v5/otp/verify', {
-      // Send authkey in headers (required by MSG91 API v5)
-      headers: {
-        'authkey': AUTH_KEY,
-        'content-type': 'application/json',
-      },
-      // Also include in params as fallback for older endpoints
-      params: {
-        authkey: AUTH_KEY,
-        mobile,
-        otp,
-      },
-      timeout: 10000,
-    });
+    // MSG91 OTP verify — POST with authkey in header, mobile+otp in body
+    const res = await axios.post(
+      `https://control.msg91.com/api/v5/otp/${otp}/verify`,
+      null,
+      {
+        params: { mobile },
+        headers: {
+          authkey: AUTH_KEY,
+          'content-type': 'application/json',
+        },
+        timeout: 10000,
+      }
+    );
 
     console.log(`🔐 [MSG91] Verify OTP response:`, JSON.stringify(res.data));
 
@@ -84,7 +86,7 @@ export const msg91Service = {
     if (!isValid) {
       console.warn(`⚠️ [MSG91] Verify failed — code: ${res.data?.code}, message: ${res.data?.message}`);
     }
-    console.log(`${isValid ? '✅' : '❌'} [MSG91] OTP verification: ${isValid ? 'valid' : 'invalid'}`);
+    console.log(`${isValid ? '✅' : '❌'} [MSG91] OTP ${isValid ? 'verified' : 'invalid'}`);
 
     return isValid;
   },
