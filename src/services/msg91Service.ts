@@ -64,8 +64,10 @@ export const msg91Service = {
     console.log(`🔐 [MSG91] Verifying OTP for: ${mobile}`);
 
     const res = await axios.get('https://control.msg91.com/api/v5/otp/verify', {
-      params: {
+      headers: {
         authkey: AUTH_KEY,
+      },
+      params: {
         mobile,
         otp,
       },
