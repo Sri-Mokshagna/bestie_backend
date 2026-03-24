@@ -61,22 +61,29 @@ export const msg91Service = {
 
     const mobile = phone.replace(/^\+/, '');
 
-    console.log(`🔐 [MSG91] Verifying OTP for: ${mobile}`);
+    console.log(`🔐 [MSG91] Verifying OTP — mobile: ${mobile}, otp: ${otp}, authkey length: ${AUTH_KEY.length}`);
 
     const res = await axios.get('https://control.msg91.com/api/v5/otp/verify', {
+      // Send authkey in headers (required by MSG91 API v5)
       headers: {
-        authkey: AUTH_KEY,
+        'authkey': AUTH_KEY,
+        'content-type': 'application/json',
       },
+      // Also include in params as fallback for older endpoints
       params: {
+        authkey: AUTH_KEY,
         mobile,
         otp,
       },
       timeout: 10000,
     });
 
-    console.log(`🔐 [MSG91] Verify OTP response:`, res.data);
+    console.log(`🔐 [MSG91] Verify OTP response:`, JSON.stringify(res.data));
 
     const isValid = res.data?.type === 'success';
+    if (!isValid) {
+      console.warn(`⚠️ [MSG91] Verify failed — code: ${res.data?.code}, message: ${res.data?.message}`);
+    }
     console.log(`${isValid ? '✅' : '❌'} [MSG91] OTP verification: ${isValid ? 'valid' : 'invalid'}`);
 
     return isValid;
