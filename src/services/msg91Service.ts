@@ -2,8 +2,7 @@ import axios from 'axios';
 
 // MSG91 credentials — set these as environment variables on Render
 const AUTH_KEY = process.env.MSG91_AUTH_KEY ?? '';
-// Template ID from MSG91 dashboard (OTP → your template → Template ID column)
-// Your template ID: 69c207670616db272c0a1770
+// Template ID: 69c207670616db272c0a1770 (from MSG91 dashboard → OTP → Template ID)
 const TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID ?? '';
 const OTP_EXPIRY_MINUTES = 10;
 const OTP_LENGTH = 6;
@@ -13,8 +12,6 @@ const OTP_LENGTH = 6;
  * Required env vars:
  *   MSG91_AUTH_KEY     = 502821TSU3X1LsvCA69c20959P1
  *   MSG91_TEMPLATE_ID  = 69c207670616db272c0a1770
- *
- * Template uses ##var1## as the OTP placeholder (MSG91 auto-fills it).
  */
 export const msg91Service = {
   /**
@@ -24,9 +21,7 @@ export const msg91Service = {
   async sendOtp(phone: string): Promise<void> {
     if (!AUTH_KEY) throw new Error('MSG91_AUTH_KEY environment variable is not set');
 
-    // MSG91 API expects mobile without '+', e.g. 919876543210
     const mobile = phone.replace(/^\+/, '');
-
     console.log(`📱 [MSG91] Sending OTP to: ${mobile}`);
 
     const res = await axios.post(
@@ -55,7 +50,8 @@ export const msg91Service = {
 
   /**
    * Verify OTP via MSG91.
-   * Uses POST with authkey in header — correct format for MSG91 API v5.
+   * Correct format: GET /api/v5/otp/verify?otp=xxx&mobile=yyy
+   * with authkey in the request header.
    * @param phone E.164 format, e.g. +919876543210
    * @param otp   6-digit OTP entered by user
    */
@@ -63,22 +59,19 @@ export const msg91Service = {
     if (!AUTH_KEY) throw new Error('MSG91_AUTH_KEY environment variable is not set');
 
     const mobile = phone.replace(/^\+/, '');
-
     console.log(`🔐 [MSG91] Verifying OTP — mobile: ${mobile}, authkey_length: ${AUTH_KEY.length}`);
 
-    // MSG91 OTP verify — POST with authkey in header, mobile+otp in body
-    const res = await axios.post(
-      `https://control.msg91.com/api/v5/otp/${otp}/verify`,
-      null,
-      {
-        params: { mobile },
-        headers: {
-          authkey: AUTH_KEY,
-          'content-type': 'application/json',
-        },
-        timeout: 10000,
-      }
-    );
+    const res = await axios.get('https://control.msg91.com/api/v5/otp/verify', {
+      headers: {
+        authkey: AUTH_KEY,
+        'content-type': 'application/json',
+      },
+      params: {
+        otp,
+        mobile,
+      },
+      timeout: 10000,
+    });
 
     console.log(`🔐 [MSG91] Verify OTP response:`, JSON.stringify(res.data));
 
