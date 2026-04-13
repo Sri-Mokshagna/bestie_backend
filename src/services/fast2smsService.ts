@@ -48,7 +48,6 @@ export const fast2smsService = {
       attempts: 0,
     });
 
-    const message = DLT_TEMPLATE.replace('{#VAR#}', otp);
     console.log(`📱 [Fast2SMS] Sending DLT OTP to: ${mobile}`);
 
     let res: any;
@@ -58,7 +57,8 @@ export const fast2smsService = {
           authorization: API_KEY,
           route: 'dlt',
           sender_id: SENDER_ID,
-          message,
+          message: DLT_TEMPLATE,       // template text with {#VAR#} intact
+          variables_values: otp,        // Fast2SMS substitutes this into {#VAR#}
           numbers: mobile,
           entity_id: ENTITY_ID,
           dlt_template_id: DLT_TEMPLATE_ID,
