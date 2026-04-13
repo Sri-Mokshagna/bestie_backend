@@ -66,15 +66,13 @@ export const fast2smsService = {
     try {
       res = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
         params: {
+          authorization: API_KEY,
           route: 'dlt',
           sender_id: SENDER_ID,
           message,
           numbers: mobile,
           entity_id: ENTITY_ID,
           ...(DLT_TEMPLATE_ID ? { dlt_template_id: DLT_TEMPLATE_ID } : {}),
-        },
-        headers: {
-          authorization: API_KEY,
         },
         timeout: 10000,
       });
