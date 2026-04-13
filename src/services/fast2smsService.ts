@@ -59,15 +59,25 @@ export const fast2smsService = {
 
     console.log(`📱 [Fast2SMS] Sending OTP to: ${mobile}`);
 
-    const res = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
-      params: {
-        authorization: API_KEY,
-        variables_values: otp,
-        route: 'otp',
-        numbers: mobile,
-      },
-      timeout: 10000,
-    });
+    let res: any;
+    try {
+      res = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
+        params: {
+          variables_values: otp,
+          route: 'otp',
+          numbers: mobile,
+        },
+        headers: {
+          authorization: API_KEY,
+        },
+        timeout: 10000,
+      });
+    } catch (err: any) {
+      // Log the full Fast2SMS error body for easier debugging
+      const body = err.response?.data;
+      console.error(`❌ [Fast2SMS] HTTP ${err.response?.status} error:`, JSON.stringify(body));
+      throw new Error(`Fast2SMS request failed (${err.response?.status}): ${JSON.stringify(body)}`);
+    }
 
     console.log(`📱 [Fast2SMS] Send OTP response:`, JSON.stringify(res.data));
 
