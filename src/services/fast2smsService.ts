@@ -7,7 +7,7 @@ const DLT_TEMPLATE_ID = process.env.FAST2SMS_DLT_TEMPLATE_ID ?? '';
 
 // DLT-registered sender and entity (approved on Fast2SMS DLT Manager)
 const SENDER_ID = 'VARSVF';
-const ENTITY_ID = '1201177450558185157';
+const ENTITY_ID = process.env.FAST2SMS_ENTITY_ID ?? '1201177450558185157';
 
 // DLT-approved template — {#VAR#} is replaced with the OTP before sending
 const DLT_TEMPLATE = 'Dear Bestie, Your Login OTP for the bestie app is {#VAR#}. -VVF Pvt Ltd';
