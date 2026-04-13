@@ -9,8 +9,9 @@ const DLT_TEMPLATE_ID = process.env.FAST2SMS_DLT_TEMPLATE_ID ?? '';
 const SENDER_ID = 'VARSVF';
 const ENTITY_ID = process.env.FAST2SMS_ENTITY_ID ?? '1201177450558185157';
 
-// DLT-approved template — {#VAR#} is replaced with the OTP before sending
-const DLT_TEMPLATE = 'Dear Bestie, Your Login OTP for the bestie app is {#VAR#}. -VVF Pvt Ltd';
+// DLT-approved template — must EXACTLY match the registered template (including newlines)
+// {#VAR#} is replaced with the OTP before sending
+const DLT_TEMPLATE = 'Dear Bestie,\n\nYour Login OTP for the bestie app is {#VAR#}.\n\n-VVF Pvt Ltd';
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 const OTP_LENGTH    = 6;
@@ -71,7 +72,6 @@ export const fast2smsService = {
           sender_id: SENDER_ID,
           message,
           numbers: mobile,
-          entity_id: ENTITY_ID,
           ...(DLT_TEMPLATE_ID ? { dlt_template_id: DLT_TEMPLATE_ID } : {}),
         },
         timeout: 10000,
