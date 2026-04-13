@@ -1,12 +1,19 @@
 import crypto from 'crypto';
 import axios from 'axios';
 
-// Fast2SMS credentials — set this as an environment variable on Render
-// Get your key from: https://www.fast2sms.com/dashboard/dev-api
-const API_KEY = process.env.FAST2SMS_API_KEY ?? '';
+// Fast2SMS credentials — set these as environment variables on Render
+const API_KEY         = process.env.FAST2SMS_API_KEY ?? '';
+const DLT_TEMPLATE_ID = process.env.FAST2SMS_DLT_TEMPLATE_ID ?? '';
+
+// DLT-registered sender and entity (approved on Fast2SMS DLT Manager)
+const SENDER_ID = 'VARSVF';
+const ENTITY_ID = '1201177450558185157';
+
+// DLT-approved template — {#VAR#} is replaced with the OTP before sending
+const DLT_TEMPLATE = 'Dear Bestie, Your Login OTP for the bestie app is {#VAR#}. -VVF Pvt Ltd';
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-const OTP_LENGTH = 6;
+const OTP_LENGTH    = 6;
 
 interface OtpEntry {
   otp: string;
@@ -20,22 +27,15 @@ interface OtpEntry {
 const otpStore = new Map<string, OtpEntry>();
 
 /**
- * Fast2SMS OTP Service
+ * Fast2SMS OTP Service — using DLT SMS route
  *
- * Fast2SMS does NOT provide a server-side OTP verification endpoint.
- * OTPs are generated here, stored in-memory with a TTL, and verified locally.
- *
- * Required env var:
- *   FAST2SMS_API_KEY  =  <your key from fast2sms.com/dashboard/dev-api>
- *
- * Fast2SMS account prerequisites:
- *   - KYC completed (Aadhaar verified)
- *   - Minimum ₹100 credit balance
- *   - OTP route enabled
+ * Required env vars (set on Render):
+ *   FAST2SMS_API_KEY         = your Dev API key from fast2sms.com/dashboard/dev-api
+ *   FAST2SMS_DLT_TEMPLATE_ID = numeric template ID from Fast2SMS DLT → Content Template tab
  */
 export const fast2smsService = {
   /**
-   * Generate a 6-digit OTP, store it, and send it via Fast2SMS.
+   * Generate a 6-digit OTP, store it, and send it via Fast2SMS DLT route.
    * @param phone E.164 format, e.g. +919876543210
    */
   async sendOtp(phone: string): Promise<void> {
@@ -57,16 +57,21 @@ export const fast2smsService = {
       attempts: 0,
     });
 
-    console.log(`📱 [Fast2SMS] Sending OTP to: ${mobile} | key_len=${API_KEY.length} key_prefix=${API_KEY.substring(0, 8)}`);
+    // Build message from DLT-approved template
+    const message = DLT_TEMPLATE.replace('{#VAR#}', otp);
+
+    console.log(`📱 [Fast2SMS] Sending DLT OTP to: ${mobile}`);
 
     let res: any;
     try {
       res = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
         params: {
-          authorization: API_KEY,   // some endpoints need it as query param too
-          variables_values: otp,
-          route: 'otp',
+          route: 'dlt',
+          sender_id: SENDER_ID,
+          message,
           numbers: mobile,
+          entity_id: ENTITY_ID,
+          ...(DLT_TEMPLATE_ID ? { dlt_template_id: DLT_TEMPLATE_ID } : {}),
         },
         headers: {
           authorization: API_KEY,
@@ -74,7 +79,6 @@ export const fast2smsService = {
         timeout: 10000,
       });
     } catch (err: any) {
-      // Log the full Fast2SMS error body for easier debugging
       const body = err.response?.data;
       console.error(`❌ [Fast2SMS] HTTP ${err.response?.status} error:`, JSON.stringify(body));
       throw new Error(`Fast2SMS request failed (${err.response?.status}): ${JSON.stringify(body)}`);
