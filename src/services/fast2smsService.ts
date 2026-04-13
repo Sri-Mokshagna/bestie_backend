@@ -57,12 +57,13 @@ export const fast2smsService = {
       attempts: 0,
     });
 
-    console.log(`📱 [Fast2SMS] Sending OTP to: ${mobile}`);
+    console.log(`📱 [Fast2SMS] Sending OTP to: ${mobile} | key_len=${API_KEY.length} key_prefix=${API_KEY.substring(0, 8)}`);
 
     let res: any;
     try {
       res = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
         params: {
+          authorization: API_KEY,   // some endpoints need it as query param too
           variables_values: otp,
           route: 'otp',
           numbers: mobile,
