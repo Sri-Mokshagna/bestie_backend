@@ -4,33 +4,33 @@ import { User, UserRole } from '../../models/User';
 import { Responder } from '../../models/Responder';
 import { AppError } from '../../middleware/errorHandler';
 import { coinService } from '../../services/coinService';
-import { msg91Service } from '../../services/msg91Service';
+import { fast2smsService } from '../../services/fast2smsService';
 
 export const authService = {
   /**
-   * Send OTP to a phone number via MSG91.
+   * Send OTP to a phone number via Fast2SMS.
    * Called by POST /api/auth/send-otp
    */
   async sendOtp(phone: string): Promise<void> {
-    console.log(`📱 Sending MSG91 OTP to: ${phone}`);
-    await msg91Service.sendOtp(phone);
+    console.log(`📱 Sending Fast2SMS OTP to: ${phone}`);
+    await fast2smsService.sendOtp(phone);
   },
 
   /**
-   * Verify OTP entered by user (via MSG91) and return user data + Firebase custom token.
+   * Verify OTP entered by user and return user data + Firebase custom token.
    * The custom token lets the client sign into Firebase and obtain an idToken
    * for all subsequent authenticated API calls (Bearer token).
    * Called by POST /api/auth/verify-otp
    */
-  async verifyMsg91Otp(phone: string, otp: string) {
-    console.log('🔐 Verifying MSG91 OTP for:', phone);
+  async verifyOtp(phone: string, otp: string) {
+    console.log('🔐 Verifying Fast2SMS OTP for:', phone);
 
-    // 1. Verify OTP with MSG91
-    const isValid = await msg91Service.verifyOtp(phone, otp);
+    // 1. Verify OTP against our in-memory store (Fast2SMS is send-only)
+    const isValid = fast2smsService.verifyOtp(phone, otp);
     if (!isValid) {
       throw new AppError(401, 'Invalid or expired OTP. Please try again.');
     }
-    console.log('✅ MSG91 OTP verified successfully');
+    console.log('✅ Fast2SMS OTP verified successfully');
 
     // 2. Find or create user by phone
     let user = await User.findOne({ phone });

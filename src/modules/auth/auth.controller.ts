@@ -11,7 +11,7 @@ export const authController = {
    * No auth required.
    */
   /**
-   * Send OTP to phone via MSG91. No auth required.
+   * Send OTP to phone via Fast2SMS. No auth required.
    */
   async sendOtp(req: AuthRequest, res: Response) {
     const { phone } = req.body;
@@ -84,8 +84,8 @@ export const authController = {
         normalised = `+91${normalised}`;
       }
 
-      // Verify OTP with MSG91 → creates/finds user → returns Firebase custom token
-      const result = await authService.verifyMsg91Otp(normalised, otp.trim());
+      // Verify OTP → creates/finds user → returns Firebase custom token
+      const result = await authService.verifyOtp(normalised, otp.trim());
 
       // Set user online after successful OTP verification
       if (result.user) {

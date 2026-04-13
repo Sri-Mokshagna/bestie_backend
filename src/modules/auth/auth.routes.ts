@@ -31,7 +31,7 @@ const otpVerifyLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Send OTP via MSG91 (strict rate limited)
+// Send OTP via Fast2SMS (strict rate limited)
 router.post('/send-otp', otpRateLimiter, asyncHandler(authController.sendOtp));
 
 // Check phone status before OTP (strict rate limited)
