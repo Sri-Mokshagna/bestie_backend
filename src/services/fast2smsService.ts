@@ -1,16 +1,15 @@
 import crypto from 'crypto';
 import axios from 'axios';
 
-// Fast2SMS credentials — set these as environment variables on Render
+// Fast2SMS credentials — set as environment variable on Render
 const API_KEY         = process.env.FAST2SMS_API_KEY ?? '';
 const DLT_TEMPLATE_ID = process.env.FAST2SMS_DLT_TEMPLATE_ID ?? '';
 
-// DLT-registered sender and entity (approved on Fast2SMS DLT Manager)
+// DLT-registered (all approved in Fast2SMS DLT Manager + PE-TM binding confirmed)
 const SENDER_ID = 'VARSVF';
-const ENTITY_ID = process.env.FAST2SMS_ENTITY_ID ?? '1201177450558185157';
+const ENTITY_ID = '1201177450558185157';
 
-// DLT-approved template — must match what's registered on DLT
-// Note: no newlines — URL query params don't transmit them reliably
+// DLT-approved template — {#VAR#} replaced with OTP before sending
 const DLT_TEMPLATE = 'Dear Bestie, Your Login OTP for the bestie app is {#VAR#}. -VVF Pvt Ltd';
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
@@ -22,46 +21,35 @@ interface OtpEntry {
   attempts: number;
 }
 
-// In-memory OTP store: phone → { otp, expiresAt, attempts }
-// NOTE: This is process-local. If you scale to multiple server instances,
-// replace this Map with a Redis-backed store.
+// In-memory OTP store — process-local; replace with Redis if multi-instance
 const otpStore = new Map<string, OtpEntry>();
 
 /**
- * Fast2SMS OTP Service — using DLT SMS route
+ * Fast2SMS OTP Service — DLT SMS route
  *
- * Required env vars (set on Render):
- *   FAST2SMS_API_KEY         = your Dev API key from fast2sms.com/dashboard/dev-api
- *   FAST2SMS_DLT_TEMPLATE_ID = numeric template ID from Fast2SMS DLT → Content Template tab
+ * Required env vars (Render):
+ *   FAST2SMS_API_KEY         = Dev API key from fast2sms.com/dashboard/dev-api
+ *   FAST2SMS_DLT_TEMPLATE_ID = DLT template ID (1207177496742046216)
  */
 export const fast2smsService = {
-  /**
-   * Generate a 6-digit OTP, store it, and send it via Fast2SMS DLT route.
-   * @param phone E.164 format, e.g. +919876543210
-   */
   async sendOtp(phone: string): Promise<void> {
     if (!API_KEY) throw new Error('FAST2SMS_API_KEY environment variable is not set');
 
-    // Strip leading +91 / + to get bare 10-digit number
     const mobile = phone.replace(/^\+91/, '').replace(/^\+/, '');
     if (!/^\d{10}$/.test(mobile)) {
       throw new Error(`Invalid Indian mobile number: ${mobile}`);
     }
 
-    // Generate cryptographically random OTP
     const otp = crypto.randomInt(10 ** (OTP_LENGTH - 1), 10 ** OTP_LENGTH).toString();
 
-    // Store with TTL and reset attempt counter
     otpStore.set(phone, {
       otp,
       expiresAt: Date.now() + OTP_EXPIRY_MS,
       attempts: 0,
     });
 
-    // Build message from DLT-approved template
     const message = DLT_TEMPLATE.replace('{#VAR#}', otp);
-
-    console.log(`📱 [Fast2SMS] Sending DLT OTP to: ${mobile}, message: "${message}"`);
+    console.log(`📱 [Fast2SMS] Sending DLT OTP to: ${mobile}`);
 
     let res: any;
     try {
@@ -72,6 +60,8 @@ export const fast2smsService = {
           sender_id: SENDER_ID,
           message,
           numbers: mobile,
+          entity_id: ENTITY_ID,
+          dlt_template_id: DLT_TEMPLATE_ID,
         },
         timeout: 10000,
       });
@@ -90,11 +80,6 @@ export const fast2smsService = {
     console.log(`✅ [Fast2SMS] OTP sent successfully to ${mobile}`);
   },
 
-  /**
-   * Verify OTP entered by user against the stored OTP.
-   * Returns true if valid, false otherwise.
-   * OTP is deleted from store on success or after 5 failed attempts.
-   */
   verifyOtp(phone: string, otp: string): boolean {
     const entry = otpStore.get(phone);
 
@@ -110,7 +95,6 @@ export const fast2smsService = {
     }
 
     entry.attempts += 1;
-
     const isValid = entry.otp === otp.trim();
 
     if (isValid) {
@@ -118,7 +102,6 @@ export const fast2smsService = {
       console.log(`✅ [Fast2SMS] OTP verified for: ${phone}`);
     } else {
       console.warn(`❌ [Fast2SMS] Invalid OTP for: ${phone} (attempt ${entry.attempts})`);
-      // Invalidate after 5 failed attempts to prevent brute-force
       if (entry.attempts >= 5) {
         otpStore.delete(phone);
         console.warn(`🚫 [Fast2SMS] OTP invalidated after 5 failed attempts for: ${phone}`);
