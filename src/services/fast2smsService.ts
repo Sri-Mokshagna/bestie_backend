@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 
 // Fast2SMS credentials — set as environment variable on Render
-const API_KEY         = process.env.FAST2SMS_API_KEY ?? '';
+const API_KEY = process.env.FAST2SMS_API_KEY ?? '';
 const DLT_TEMPLATE_ID = process.env.FAST2SMS_DLT_TEMPLATE_ID ?? '';
 
 // DLT-registered (all approved in Fast2SMS DLT Manager + PE-TM binding confirmed)
@@ -13,7 +13,7 @@ const ENTITY_ID = '1201177450558185157';
 const DLT_TEMPLATE = 'Dear Bestie, Your Login OTP for the bestie app is {#VAR#}. -VVF Pvt Ltd';
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-const OTP_LENGTH    = 6;
+const OTP_LENGTH = 6;
 
 interface OtpEntry {
   otp: string;
@@ -48,7 +48,14 @@ export const fast2smsService = {
       attempts: 0,
     });
 
-    console.log(`📱 [Fast2SMS] Sending DLT OTP to: ${mobile}`);
+    // Debug: verify all values before sending
+    console.log('🔍 [Fast2SMS] DLT params:', {
+      sender_id: SENDER_ID,
+      entity_id: ENTITY_ID,
+      dlt_template_id: DLT_TEMPLATE_ID,
+      message: DLT_TEMPLATE,
+      variables_values: otp,
+    });
 
     let res: any;
     try {
@@ -61,7 +68,7 @@ export const fast2smsService = {
           variables_values: otp,
           numbers: mobile,
           entity_id: ENTITY_ID,
-          message_id: DLT_TEMPLATE_ID,   // some Fast2SMS docs use message_id instead of dlt_template_id
+          dlt_template_id: DLT_TEMPLATE_ID,
         },
         timeout: 10000,
       });
