@@ -10,7 +10,7 @@ const SENDER_ID = 'VARSVF';
 const ENTITY_ID = '1201177450558185157';
 
 // MUST match EXACTLY what's on Jio DLT portal — lowercase {#var#}, single newlines
-const DLT_TEMPLATE = 'Dear Bestie,\nYour Login OTP for the bestie app is {#var#}.\n-VVF Pvt Ltd';
+const DLT_TEMPLATE = 'Dear Bestie,\n\nYour Login OTP for the bestie app is {#var#}.\n\n-VVF Pvt Ltd';
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 const OTP_LENGTH = 6;
@@ -60,7 +60,7 @@ export const fast2smsService = {
     let res: any;
     try {
       res = await axios.post(
-        'https://www.fast2sms.com/dev/bulkV2',
+        'https://www.fast2sms.com/dev/dlt',
         {
           route: 'dlt',
           sender_id: SENDER_ID,
