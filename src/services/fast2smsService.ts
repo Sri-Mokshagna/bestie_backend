@@ -48,13 +48,15 @@ export const fast2smsService = {
       attempts: 0,
     });
 
+    // Substitute OTP directly — no variables_values, simplest form
+    const message = DLT_TEMPLATE.replace('{#var#}', otp);
+
     // Debug: verify all values before sending
     console.log('🔍 [Fast2SMS] DLT params:', {
       sender_id: SENDER_ID,
       entity_id: ENTITY_ID,
       dlt_template_id: DLT_TEMPLATE_ID,
-      message: DLT_TEMPLATE,
-      variables_values: otp,
+      message,
     });
 
     let res: any;
@@ -64,8 +66,7 @@ export const fast2smsService = {
           authorization: API_KEY,
           route: 'dlt',
           sender_id: SENDER_ID,
-          message: DLT_TEMPLATE,
-          variables_values: otp,
+          message,
           numbers: mobile,
           entity_id: ENTITY_ID,
           dlt_template_id: DLT_TEMPLATE_ID,
