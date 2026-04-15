@@ -59,9 +59,9 @@ export const fast2smsService = {
 
     let res: any;
     try {
-      res = await axios.post(
-        'https://www.fast2sms.com/dev/dlt',
-        {
+      res = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
+        params: {
+          authorization: API_KEY,
           route: 'dlt',
           sender_id: SENDER_ID,
           message: DLT_TEMPLATE,
@@ -70,14 +70,8 @@ export const fast2smsService = {
           entity_id: ENTITY_ID,
           dlt_template_id: DLT_TEMPLATE_ID,
         },
-        {
-          headers: {
-            authorization: API_KEY,
-            'Content-Type': 'application/json',
-          },
-          timeout: 10000,
-        }
-      );
+        timeout: 10000,
+      });
     } catch (err: any) {
       const body = err.response?.data;
       console.error(`❌ [Fast2SMS] HTTP ${err.response?.status} error:`, JSON.stringify(body));
