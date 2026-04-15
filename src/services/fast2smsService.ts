@@ -13,7 +13,7 @@ const ENTITY_ID = '1201177450558185157';
 const DLT_TEMPLATE = 'Dear Bestie,\nYour Login OTP for the bestie app is {#var#}.\n-VVF Pvt Ltd';
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-const OTP_LENGTH = 4; // Match the 4-digit sample registered on Jio DLT portal
+const OTP_LENGTH = 6;
 
 interface OtpEntry {
   otp: string;
@@ -48,15 +48,13 @@ export const fast2smsService = {
       attempts: 0,
     });
 
-    // Substitute OTP directly — no variables_values, simplest form
-    const message = DLT_TEMPLATE.replace('{#var#}', otp);
-
-    // Debug: verify all values before sending
+    // Send template as-is with {#var#} intact, Fast2SMS substitutes internally
     console.log('🔍 [Fast2SMS] DLT params:', {
       sender_id: SENDER_ID,
       entity_id: ENTITY_ID,
       dlt_template_id: DLT_TEMPLATE_ID,
-      message,
+      message: DLT_TEMPLATE,
+      variables_values: otp,
     });
 
     let res: any;
@@ -66,7 +64,8 @@ export const fast2smsService = {
           authorization: API_KEY,
           route: 'dlt',
           sender_id: SENDER_ID,
-          message,
+          message: DLT_TEMPLATE,
+          variables_values: otp,
           numbers: mobile,
           entity_id: ENTITY_ID,
           dlt_template_id: DLT_TEMPLATE_ID,
