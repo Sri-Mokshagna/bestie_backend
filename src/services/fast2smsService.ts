@@ -13,7 +13,7 @@ const ENTITY_ID = '1201177450558185157';
 const DLT_TEMPLATE = 'Dear Bestie,\nYour Login OTP for the bestie app is {#var#}.\n-VVF Pvt Ltd';
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-const OTP_LENGTH = 6;
+const OTP_LENGTH = 4; // Match the 4-digit sample registered on Jio DLT portal
 
 interface OtpEntry {
   otp: string;
