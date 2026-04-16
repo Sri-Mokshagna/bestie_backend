@@ -49,9 +49,11 @@ export const responderService = {
     // - If user has no language set, show all responders (backward compatible)
     if (userLanguage && userLanguage !== 'en') {
       // Non-English user: show responders who speak their language OR English
-      const filtered = respondersWithUsers.filter((item) => {
+    const filtered = respondersWithUsers.filter((item) => {
         const responderLang = item.user?.profile?.language;
-        return responderLang === userLanguage || responderLang === 'en' || !responderLang;
+        // Non-English user: see responders who speak their language OR English
+        // Responders with no language set are NOT shown to non-English users
+        return responderLang === userLanguage || responderLang === 'en';
       });
       // Sort: same-language first, then English
       filtered.sort((a, b) => {

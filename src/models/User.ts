@@ -41,6 +41,7 @@ export interface IUser extends Document {
   fcmToken?: string; // Firebase Cloud Messaging token for push notifications
   role: UserRole;
   coinBalance: number;
+  adCoinBalance: number; // Coins earned from watching ads — used first when charging for messages
   rewardPoints: number; // Points earned from watching ads, referrals, etc.
   profile: IUserProfile;
   password?: string; // For admin login
@@ -83,6 +84,11 @@ const userSchema = new Schema<IUser>(
       default: UserRole.USER,
     },
     coinBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    adCoinBalance: {
       type: Number,
       default: 0,
       min: 0,

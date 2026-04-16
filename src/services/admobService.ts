@@ -141,8 +141,8 @@ export class AdMobService {
 
       const coins = this.rewardConfig.adCoinsPerVideo; // 6 coins per ad
 
-      // Credit coins directly
-      user.coinBalance = (user.coinBalance || 0) + coins;
+      // Credit to adCoinBalance (priority bucket) — used first when sending messages
+      user.adCoinBalance = (user.adCoinBalance || 0) + coins;
       await user.save({ session });
 
       // Create transaction record
@@ -168,16 +168,20 @@ export class AdMobService {
       await session.commitTransaction();
 
       logger.info({
-        msg: 'Rewarded video coins credited',
+        msg: 'Rewarded video ad coins credited to adCoinBalance',
         userId,
         coins,
-        newBalance: user.coinBalance,
+        newAdCoinBalance: user.adCoinBalance,
+        coinBalance: user.coinBalance,
       });
+
+      // Return combined total as coinBalance so Flutter needs no changes
+      const totalBalance = (user.coinBalance || 0) + (user.adCoinBalance || 0);
 
       return {
         success: true,
         coins,
-        coinBalance: user.coinBalance,
+        coinBalance: totalBalance,
         points: coins, // for backward compat with Flutter response parsing
         rewardPoints: user.rewardPoints || 0,
       };

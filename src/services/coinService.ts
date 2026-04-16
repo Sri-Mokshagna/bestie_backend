@@ -77,7 +77,8 @@ export class CoinService {
     if (!user) {
       throw new AppError(404, 'User not found');
     }
-    return user.coinBalance >= requiredCoins;
+    // Total spendable = ad coins (priority) + regular coins
+    return (user.coinBalance + (user.adCoinBalance || 0)) >= requiredCoins;
   }
 
   /**
@@ -88,7 +89,8 @@ export class CoinService {
     if (!user) {
       throw new AppError(404, 'User not found');
     }
-    return user.coinBalance;
+    // Return combined balance (ad coins + regular coins)
+    return (user.coinBalance || 0) + (user.adCoinBalance || 0);
   }
 
   /**
@@ -152,52 +154,71 @@ export class CoinService {
       const actualResponderId = recipientId;
       const user = sender;
 
-      // Check balance (user is already fetched above)
-      if (user.coinBalance < coinsToDeduct) {
+      // Total spendable = ad coins (priority bucket) + regular coins
+      const adCoins = user.adCoinBalance || 0;
+      const totalBalance = user.coinBalance + adCoins;
+
+      if (totalBalance < coinsToDeduct) {
         throw new AppError(400, 'Insufficient coins', 'INSUFFICIENT_COINS');
       }
 
-      // CRITICAL: Use atomic update with balance check to prevent race conditions
+      // Compute split: drain adCoinBalance first, then coinBalance
+      const fromAdCoins = Math.min(adCoins, coinsToDeduct);
+      const fromRegularCoins = coinsToDeduct - fromAdCoins;
+
+      // Build atomic update — only include fields that actually change
+      const incUpdate: Record<string, number> = {};
+      if (fromAdCoins > 0) incUpdate['adCoinBalance'] = -fromAdCoins;
+      if (fromRegularCoins > 0) incUpdate['coinBalance'] = -fromRegularCoins;
+
+      // CRITICAL: atomic update with balance guard to prevent race conditions
       const updateResult = await User.updateOne(
         {
           _id: actualUserId,
-          coinBalance: { $gte: coinsToDeduct } // Only update if balance is sufficient
+          coinBalance: { $gte: fromRegularCoins },
+          ...(fromAdCoins > 0 ? { adCoinBalance: { $gte: fromAdCoins } } : {}),
         },
-        { $inc: { coinBalance: -coinsToDeduct } },
+        { $inc: incUpdate },
         { session }
       );
 
-      // Double-check that the update succeeded
       if (updateResult.modifiedCount === 0) {
         logger.error({
           msg: 'Race condition detected: Balance insufficient during transaction',
           userId: actualUserId,
-          userBalance: user.coinBalance,
+          adCoins,
+          coinBalance: user.coinBalance,
           coinsToDeduct,
         });
         throw new AppError(400, 'Insufficient coins', 'INSUFFICIENT_COINS');
       }
 
-      // CRITICAL: Coins are deducted from user but NOT credited to responder
-      // This is by design - chat messages cost coins but responders don't earn from them
       logger.info({
         chatId,
         userId: actualUserId,
         responderId: actualResponderId,
         coinsDeducted: coinsToDeduct,
-      }, '💬 Chat coins deducted (not paid to responder)');
+        fromAdCoins,
+        fromRegularCoins,
+      }, '💬 Chat coins deducted (ad coins first)');
 
-      // Create transaction record (no responder earnings)
+      // Create transaction record
       await Transaction.create(
         [
           {
             userId: actualUserId,
             responderId: actualResponderId,
             type: TransactionType.CHAT,
-            coins: coinsToDeduct, // User was charged this many coins
-            responderEarnings: 0, // Responder earns NOTHING from chat
+            coins: coinsToDeduct,
+            responderEarnings: 0,
             status: TransactionStatus.COMPLETED,
-            meta: { chatId, senderId, note: 'Chat messages are free for responders' },
+            meta: {
+              chatId,
+              senderId,
+              fromAdCoins,
+              fromRegularCoins,
+              note: 'Ad coins used first, then regular coins',
+            },
           },
         ],
         { session }
@@ -205,18 +226,24 @@ export class CoinService {
 
       await session.commitTransaction();
 
+      const newAdCoins = adCoins - fromAdCoins;
+      const newCoinBalance = user.coinBalance - fromRegularCoins;
+      const newTotalBalance = newCoinBalance + newAdCoins;
+
       logger.info({
         msg: 'Chat coins deducted',
         senderId,
         recipientId,
-        actualUserId,
-        actualResponderId,
         coins: coinsToDeduct,
-        newBalance: user.coinBalance - coinsToDeduct,
+        fromAdCoins,
+        fromRegularCoins,
+        newAdCoins,
+        newCoinBalance,
+        newTotalBalance,
       });
 
       return {
-        balance: user.coinBalance - coinsToDeduct,
+        balance: newTotalBalance,
         coinsDeducted: coinsToDeduct,
       };
     } catch (error) {
