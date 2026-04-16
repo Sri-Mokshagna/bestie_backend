@@ -12,6 +12,10 @@ const ENTITY_ID = '1201177450558185157';
 // MUST match EXACTLY what's on Jio DLT portal — lowercase {#var#}, single newlines
 const DLT_TEMPLATE = 'Dear Bestie,\n\nYour Login OTP for the bestie app is {#var#}.\n\n-VVF Pvt Ltd';
 
+// Fast2SMS INTERNAL message ID (from support team — NOT the DLT template ID)
+// DLT Template ID 1207177496742046216 maps to Fast2SMS message ID 213597
+const FAST2SMS_MESSAGE_ID = '213597';
+
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 const OTP_LENGTH = 6;
 
@@ -28,8 +32,11 @@ const otpStore = new Map<string, OtpEntry>();
  * Fast2SMS OTP Service — DLT SMS route
  *
  * Required env vars (Render):
- *   FAST2SMS_API_KEY         = Dev API key from fast2sms.com/dashboard/dev-api
- *   FAST2SMS_DLT_TEMPLATE_ID = DLT template ID (1207177496742046216)
+ *   FAST2SMS_API_KEY = Dev API key from fast2sms.com/dashboard/dev-api
+ *
+ * Correct API format confirmed by Fast2SMS support:
+ *   message = Fast2SMS internal ID (213597), NOT the DLT template ID
+ *   variables_values = OTP followed by pipe character (e.g. "123456|")
  */
 export const fast2smsService = {
   async sendOtp(phone: string): Promise<void> {
@@ -48,14 +55,7 @@ export const fast2smsService = {
       attempts: 0,
     });
 
-    // Send template as-is with {#var#} intact, Fast2SMS substitutes internally
-    console.log('🔍 [Fast2SMS] DLT params:', {
-      sender_id: SENDER_ID,
-      entity_id: ENTITY_ID,
-      dlt_template_id: DLT_TEMPLATE_ID,
-      message: DLT_TEMPLATE,
-      variables_values: otp,
-    });
+    console.log(`📱 [Fast2SMS] Sending OTP to: ${mobile}, message_id: ${FAST2SMS_MESSAGE_ID}`);
 
     let res: any;
     try {
@@ -64,10 +64,10 @@ export const fast2smsService = {
           authorization: API_KEY,
           route: 'dlt',
           sender_id: SENDER_ID,
-          message: DLT_TEMPLATE.replace('{#var#}', otp),
+          message: FAST2SMS_MESSAGE_ID,  // Fast2SMS internal ID, NOT DLT template ID
+          variables_values: `${otp}|`,   // pipe suffix required per Fast2SMS support
+          flash: 0,
           numbers: mobile,
-          entity_id: ENTITY_ID,
-          dlt_template_id: DLT_TEMPLATE_ID,
         },
         timeout: 10000,
       });
