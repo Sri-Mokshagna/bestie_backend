@@ -59,9 +59,11 @@ export const fast2smsService = {
 
     let res: any;
     try {
-      res = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
-        params: {
-          authorization: API_KEY,
+      // POST with JSON body avoids query-param URL-encoding issues (e.g. pipe in variables_values
+      // being misinterpreted, which corrupted the numbers field and caused status_code 411).
+      res = await axios.post(
+        'https://www.fast2sms.com/dev/bulkV2',
+        {
           route: 'dlt',
           sender_id: SENDER_ID,
           message: FAST2SMS_MESSAGE_ID,  // Fast2SMS internal ID, NOT DLT template ID
@@ -69,8 +71,14 @@ export const fast2smsService = {
           flash: 0,
           numbers: mobile,
         },
-        timeout: 10000,
-      });
+        {
+          headers: {
+            authorization: API_KEY,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        }
+      );
     } catch (err: any) {
       const body = err.response?.data;
       console.error(`❌ [Fast2SMS] HTTP ${err.response?.status} error:`, JSON.stringify(body));
