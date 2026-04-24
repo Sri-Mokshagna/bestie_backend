@@ -42,8 +42,13 @@ export const authenticate = async (
           await user.save();
         }
       } else if (uid) {
-        // Admin flow: custom token signs in with uid = Mongo user.id
-        user = await User.findById(uid);
+        // Custom token flow: uid may be Mongo _id OR a Firebase UID stored in firebaseUid.
+        // Try both lookups so onboarding (custom token → no phone_number claim) works correctly.
+        user = await User.findById(uid).catch(() => null);
+        if (!user) {
+          // uid is the Firebase UID stored in firebaseUid field
+          user = await User.findOne({ firebaseUid: uid });
+        }
       }
 
       if (user && user.status === 'active') {
