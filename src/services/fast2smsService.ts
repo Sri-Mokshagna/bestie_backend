@@ -42,9 +42,16 @@ export const fast2smsService = {
   async sendOtp(phone: string): Promise<void> {
     if (!API_KEY) throw new Error('FAST2SMS_API_KEY environment variable is not set');
 
-    const mobile = phone.replace(/^\+91/, '').replace(/^\+/, '');
-    if (!/^\d{10}$/.test(mobile)) {
-      throw new Error(`Invalid Indian mobile number: ${mobile}`);
+    // Strip country code (+91 or 91 prefix) to get bare 10-digit number
+    const mobile = phone.replace(/^\+91/, '').replace(/^91/, '').replace(/^\+/, '').trim();
+
+    // Indian mobile numbers are exactly 10 digits AND must start with 6, 7, 8 or 9.
+    // Numbers starting with other digits (e.g. 1234567890) are invalid and Fast2SMS
+    // will reject them with status_code 411 "Invalid Numbers".
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      throw new Error(
+        `Invalid Indian mobile number: "${mobile}". Must be 10 digits starting with 6, 7, 8, or 9.`
+      );
     }
 
     const otp = crypto.randomInt(10 ** (OTP_LENGTH - 1), 10 ** OTP_LENGTH).toString();
