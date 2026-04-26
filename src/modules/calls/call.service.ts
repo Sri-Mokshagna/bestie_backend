@@ -44,7 +44,8 @@ export const callService = {
       : config.videoCallCoinsPerMinute;
     const minCoinsRequired = Math.ceil((ratePerMinute / 60) * minDuration);
 
-    if (user.coinBalance < minCoinsRequired) {
+    const totalAvailableCoins = (user.coinBalance || 0) + (user.adCoinBalance || 0);
+    if (totalAvailableCoins < minCoinsRequired) {
       throw new AppError(
         400,
         `Insufficient coins. You need at least ${minCoinsRequired} coins for a ${type} call.`,
@@ -523,8 +524,9 @@ export const callService = {
     const callType = call.type === CallType.AUDIO ? 'audio' : 'video';
     const rate = await coinService.getCallRate(callType);
 
-    // Calculate max seconds (rate is coins per minute, convert to seconds)
-    const maxDurationSeconds = Math.floor((user.coinBalance / rate) * 60);
+    // Calculate max seconds using TOTAL balance (adCoinBalance + coinBalance)
+    const totalUserBalance = (user.coinBalance || 0) + (user.adCoinBalance || 0);
+    const maxDurationSeconds = Math.floor((totalUserBalance / rate) * 60);
 
     if (maxDurationSeconds < 1) {
       throw new AppError(400, 'Insufficient coins to start call');
@@ -674,12 +676,33 @@ export const callService = {
       // rate is coins per minute, calculate proportional coins for actual duration
       const coinsToDeduct = Math.ceil((durationSeconds / 60) * rate);
 
-      // Deduct coins from user
+      // Deduct coins from user — drain adCoinBalance first, then coinBalance (atomic)
       const user = await User.findById(call.userId);
       if (user) {
-        const actualDeduction = Math.min(coinsToDeduct, user.coinBalance);
-        user.coinBalance -= actualDeduction;
-        await user.save();
+        const adCoins = user.adCoinBalance || 0;
+        const totalAvailable = (user.coinBalance || 0) + adCoins;
+        const actualDeduction = Math.min(coinsToDeduct, totalAvailable);
+
+        // Split: drain adCoinBalance first, then coinBalance
+        const fromAdCoins = Math.min(adCoins, actualDeduction);
+        const fromRegularCoins = actualDeduction - fromAdCoins;
+
+        // Build atomic $inc update — only include fields that actually change
+        const incUpdate: Record<string, number> = {};
+        if (fromAdCoins > 0) incUpdate['adCoinBalance'] = -fromAdCoins;
+        if (fromRegularCoins > 0) incUpdate['coinBalance'] = -fromRegularCoins;
+
+        // Atomic update with balance guard — prevents race conditions
+        if (Object.keys(incUpdate).length > 0) {
+          await User.findOneAndUpdate(
+            {
+              _id: call.userId,
+              coinBalance: { $gte: fromRegularCoins },
+              ...(fromAdCoins > 0 ? { adCoinBalance: { $gte: fromAdCoins } } : {}),
+            },
+            { $inc: incUpdate }
+          );
+        }
 
         // Get commission config (cached)
         const responderPercentage = await commissionService.getResponderPercentage();
@@ -708,9 +731,9 @@ export const callService = {
             }
           },
           {
-            new: true,  // Return updated document
-            upsert: true,  // Create if doesn't exist
-            setDefaultsOnInsert: true,  // Set defaults when creating
+            new: true,
+            upsert: true,
+            setDefaultsOnInsert: true,
           }
         );
 
@@ -739,13 +762,15 @@ export const callService = {
             userId: call.userId,
             responderId: call.responderId,
             coins: actualDeduction,
-            responderEarnings: responderRupees, // Store actual earnings at transaction time
+            responderEarnings: responderRupees,
             type: TransactionType.CALL,
             status: TransactionStatus.COMPLETED,
             meta: {
               callId: String(call._id),
               callType: call.type,
               durationSeconds,
+              fromAdCoins,
+              fromRegularCoins,
               description: `${call.type} call - ${durationSeconds}s`,
             },
           },
@@ -757,13 +782,16 @@ export const callService = {
           callId: String(call._id),
           durationSeconds,
           coinsDeducted: actualDeduction,
+          fromAdCoins,
+          fromRegularCoins,
           responderEarnedCoins: responderCoins,
-          responderEarnedRupees: responderRupees, // Now logging rupees
+          responderEarnedRupees: responderRupees,
           commissionRate: responderPercentage,
           coinToINRRate,
-          userBalance: user.coinBalance,
+          userRemainingCoinBalance: (user.coinBalance || 0) - fromRegularCoins,
+          userRemainingAdCoinBalance: adCoins - fromAdCoins,
           responderPendingRupees: responderUpdate.earnings.pendingRupees,
-        }, 'Coins deducted for call and responder credited in RUPEES');
+        }, 'Coins deducted for call (adCoins first) and responder credited in RUPEES');
       }
     }
 
@@ -1171,7 +1199,7 @@ export const callService = {
       'Cleanup: checking stale calls'
     );
 
-    // Mark calls that exceeded their time limit as ended
+    // Mark calls that exceeded their time limit as ended — WITH proper coin deduction
     for (const call of activeCalls) {
       logger.warn(
         {
@@ -1179,23 +1207,29 @@ export const callService = {
           startTime: call.startTime,
           scheduledEndTime: call.scheduledEndTime,
         },
-        'Ending call that exceeded scheduled end time'
+        'Ending stale call — deducting coins and crediting responder'
       );
 
-      call.status = CallStatus.ENDED;
-      call.endTime = now;
+      try {
+        // endCallAndDeductCoins handles: coin deduction, responder credit,
+        // transaction creation, status/endTime update, inCall reset, call message
+        await this.endCallAndDeductCoins(call);
 
-      // Calculate actual duration for billing
-      if (call.startTime) {
-        const durationMs = now.getTime() - call.startTime.getTime();
-        call.durationSeconds = Math.floor(durationMs / 1000);
+        // Notify both parties that the call has ended
+        emitToUser(call.userId.toString(), 'call_ended', {
+          callId: String(call._id),
+          reason: 'time_limit_reached',
+        });
+        emitToUser(call.responderId.toString(), 'call_ended', {
+          callId: String(call._id),
+          reason: 'time_limit_reached',
+        });
+      } catch (err: any) {
+        logger.error(
+          { callId: String(call._id), error: err.message },
+          '❌ Failed to end stale call during cleanup'
+        );
       }
-
-      await call.save();
-
-      // Reset inCall flag for responder
-      await User.findByIdAndUpdate(call.responderId, { inCall: false });
-      await Responder.findOneAndUpdate({ userId: call.responderId }, { inCall: false });
     }
 
     return {
